@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+*.tsbuildinfo
+play.html
+
+# Local tooling config (contains machine-specific absolute paths)
+.claude/
+# Third-party platform documentation, kept locally only
+toy-js-sdk-abilities.md

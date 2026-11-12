@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build && node scripts/build-standalone.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
-    "sim": "tsx scripts/sim.ts"
+    "sim": "tsx scripts/sim.ts",
+    "pack": "npm run build && rm -f million-danmaku.zip && cd dist && zip -qr -X ../million-danmaku.zip . -x '.*' -x play.html && cd .. && node scripts/check-pack.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

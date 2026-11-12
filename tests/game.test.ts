@@ -5,7 +5,7 @@ import { playBot } from '../src/game/bot';
 import { CHARS, unlockedChars } from '../src/game/chars';
 import { NO_PERKS, isTriple, perkCount, perksFromBits, perksToBits, type Perks } from '../src/game/perks';
 import { RELICS, relicPrice, RELIC_BY_ID } from '../src/game/relics';
-import { buyRelic, chooseUpgrade, createRun, currentMultiplier, dronePos, leaveShop, readyFusions, recalc, rerollChoices, rerollShop, rollChoices, scoreCtx, stepRun, ultReady, useUlt, type Enemy, type Run } from '../src/game/run';
+import { PIN_VULN, buyRelic, chooseUpgrade, createRun, currentMultiplier, dronePos, leaveShop, readyFusions, recalc, rerollChoices, rerollShop, rollChoices, scoreCtx, stepRun, ultReady, useUlt, type Enemy, type Run } from '../src/game/run';
 import { TECHS, TIERS, buyTech, canBuyTech, decodeTech, encodeTech, maxTech, mergeTech, noTech, runInsight, techCost, techFx, techLeft, techOpen, techSpent } from '../src/game/tech';
 import { clampScore, comboMult, fanGain, multiplier, type ScoreCtx } from '../src/game/scoring';
 import { FUSE_LEVEL, RECIPES, WEAPONS, WEAPON_BY_ID, maxLevel, partnerOf, recipeHint, weaponStats, type WeaponId } from '../src/game/weapons';
@@ -16,7 +16,7 @@ const ctx = (o: Partial<ScoreCtx> = {}): ScoreCtx => ({ addBase: 0, addMult: 0, 
 function dummy(run: Run, x: number, y: number, hp = 1e9): Enemy {
   const e: Enemy = {
     id: run.nextId++, kind: 'scroll', text: '草', x, y, w: 12, h: 12, scale: 1, vx: 0, hp, maxHp: hp, base: 1, tier: 0, xp: 0, coins: 0,
-    color: '#ffffff', t: 5, life: 0, shootCd: 0, flash: 0, starCd: 0, grazeCd: 0, mark: 0, slow: 0, slowK: 1, dead: false, boss: 0, atk: 0, angle: 0,
+    color: '#ffffff', t: 5, life: 0, shootCd: 0, flash: 0, starCd: 0, grazeCd: 0, mark: 0, held: 0, slow: 0, slowK: 1, dead: false, boss: 0, atk: 0, angle: 0,
   };
   run.enemies.push(e);
   return e;
@@ -425,8 +425,30 @@ describe('trick weapons', () => {
     expect(free.x).toBeLessThan(pin.x);
     expect(free.hp).toBe(1e6);
     expect(run.bullets).toHaveLength(0);
+    expect(e.held).toBeGreaterThan(0);
+    expect(free.held).toBeLessThanOrEqual(0);
     tick(run, 3);
     expect(run.pins).toHaveLength(0);
+  });
+  it('置顶 makes what it holds take more damage, and blows up when its time is up', () => {
+    const st = weaponStats('pin', 1);
+    const run = lab([['pin', 1]]);
+    tick(run, 0.1);
+    const pin = run.pins[0];
+    const held = dummy(run, pin.x + pin.w + 20, pin.y, 1e6);
+    held.vx = -200;
+    const near = dummy(run, pin.x + 4, pin.y + 20, 1e6); // other row, inside the blast
+    const far = dummy(run, pin.x + 4, pin.y + 120, 1e6);
+    tick(run, 0.5);
+    expect(held.held).toBeGreaterThan(0);
+    // Ticks hit the held one at 1.5x.
+    const ticked = 1e6 - held.hp;
+    expect(ticked / (st.dmg * PIN_VULN)).toBeCloseTo(Math.round(ticked / (st.dmg * PIN_VULN)));
+    expect(near.hp).toBe(1e6);
+    tick(run, st.dur);
+    expect(run.pins).toHaveLength(0);
+    expect(1e6 - near.hp).toBeCloseTo(st.dmg2);
+    expect(far.hp).toBe(1e6);
   });
   it('憋大招 charges while standing still and fires on moving, or by itself when full', () => {
     const run = lab([['hold', 1]]);

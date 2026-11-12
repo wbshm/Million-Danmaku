@@ -42,8 +42,8 @@ export const WEAPONS: readonly WeaponDef[] = [
   { id: 'keyword', name: '关键词', glyph: '词', color: '#ff8fb8', fusion: false, trick: true, desc: '找出满屏弹幕里最常见的字，带这个字的全部受伤' },
   { id: 'convert', name: '洗白', glyph: '洗', color: '#7dffb0', fusion: false, trick: true, desc: '被它打败的弹幕变成粉丝弹幕，掉头撞向同行，还能挡子弹' },
   { id: 'remix', name: '鬼畜', glyph: '鬼', color: '#ffb347', fusion: false, trick: true, desc: '每打败几个弹幕，就把它剪成单字四散飞射' },
-  { id: 'pin', name: '置顶', glyph: '顶', color: '#ffe14a', fusion: false, trick: true, desc: '在面朝方向的身前放一块置顶牌，拦住这一行的弹幕并持续伤害，还能挡子弹' },
-  { id: 'hold', name: '憋大招', glyph: '憋', color: '#ff6b5c', fusion: false, trick: true, desc: '站着不动蓄力（最多三段），一动就放出冲击波；蓄满威力 +50%' },
+  { id: 'pin', name: '置顶', glyph: '顶', color: '#ffe14a', fusion: false, trick: true, desc: '身前放置顶牌拦住一行弹幕和子弹，被拦的受伤 +50%，到时爆炸' },
+  { id: 'hold', name: '憋大招', glyph: '憋', color: '#ff6b5c', fusion: false, trick: true, desc: '站着不动蓄力，最多三段，一动就放冲击波，蓄满威力 +50%' },
   { id: 'graze', name: '极限走位', glyph: '极', color: '#9fe8ff', fusion: false, trick: true, desc: '每次擦弹（贴着弹幕或子弹掠过）都向附近弹幕射出反击镖' },
   { id: 'storm', name: '弹幕风暴', glyph: '暴', color: '#ff5fa2', fusion: true, desc: '七向穿透弹幕，高速连发' },
   { id: 'thunder', name: '氪金雷暴', glyph: '雷', color: '#ffc21a', fusion: true, desc: '多道落雷，每道都会大范围爆炸' },
@@ -52,7 +52,7 @@ export const WEAPONS: readonly WeaponDef[] = [
   { id: 'squad', name: '应援团', glyph: '团', color: '#ff7ab8', fusion: true, desc: '三块灯牌一起扔回旋进度条' },
   { id: 'control', name: '控评', glyph: '控', color: '#5dffa0', fusion: true, desc: '一次点名两个关键字并减速，被打败的全部倒戈成粉丝弹幕' },
   { id: 'scene', name: '名场面', glyph: '名', color: '#ffc46b', fusion: true, desc: '每次擦弹都把那条弹幕炸成单字，每打败两个弹幕再炸一次' },
-  { id: 'anchor', name: '镇站之宝', glyph: '镇', color: '#fff27a', fusion: true, desc: '同时放三块置顶牌，每块都不断放出冲击波' },
+  { id: 'anchor', name: '镇站之宝', glyph: '镇', color: '#fff27a', fusion: true, desc: '同时放三块置顶牌，每块都不断放出冲击波，到时再炸一次' },
 ];
 
 export const WEAPON_BY_ID: Record<WeaponId, WeaponDef> = Object.fromEntries(WEAPONS.map(w => [w.id, w])) as Record<WeaponId, WeaponDef>;
@@ -122,8 +122,8 @@ export function weaponStats(id: WeaponId, lvl: number): WeaponStats {
     // 洗白: dmg2 / pierce are the ram damage and the number of rams of the ally it leaves behind.
     case 'convert': return S({ dmg: 6 + 3 * l, cd: 1.0 * Math.pow(0.93, l), count: lvl >= 3 ? 2 : 1, dmg2: 5 + 2.5 * l, pierce: 3 + lvl });
     case 'remix': return S({ dmg: 3 + 1.5 * l, count: lvl >= 5 ? 2 : lvl >= 3 ? 3 : 4, pierce: lvl >= 4 ? 1 : 0 });
-    // 置顶: dmg per 0.4 s tick to whatever is held against the block.
-    case 'pin': return S({ dmg: 2 + l, cd: 5.5 * Math.pow(0.95, l), count: lvl >= 4 ? 2 : 1, dur: 4 + 0.5 * l });
+    // 置顶: dmg per 0.3 s tick to whatever is held against the block; dmg2 / radius are the blast when it goes.
+    case 'pin': return S({ dmg: 3 + 1.5 * l, cd: 5.5 * Math.pow(0.95, l), count: lvl >= 4 ? 2 : 1, dur: 4 + 0.5 * l, dmg2: 12 + 6 * l, radius: 28 + 2 * l });
     // 憋大招: dmg per charged stage, cd = seconds per stage, radius grows 9 px per stage.
     case 'hold': return S({ dmg: 7 + 3.5 * l, cd: 0.7, count: 3, radius: 24 + 2 * l });
     case 'graze': return S({ dmg: 5 + 2.5 * l, count: 1 + (lvl >= 3 ? 1 : 0) + (lvl >= 5 ? 1 : 0), radius: 1 + Math.floor(l / 2) });

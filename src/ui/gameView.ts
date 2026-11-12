@@ -43,6 +43,8 @@ function drawEnemy(gfx: Gfx, e: Enemy, time: number, frozen: boolean): void {
   // 关键词 just named this one: strike it through.
   if (e.mark > 0) gfx.rect(e.x - 1, e.y + e.h / 2 - 1, e.w + 2, e.scale + 1, '#ff8fb8');
   if (e.slow > 0 && !frozen) gfx.rect(e.x, e.y + e.h, e.w, 1, '#aab4ff');
+  // Held against a 置顶牌: takes extra damage from everything.
+  if (e.held > 0) gfx.rect(e.x, e.y - 1, e.w, 1, '#ffe14a');
   if (e.kind === 'big' && e.hp < e.maxHp) {
     gfx.rect(e.x, e.y + e.h + 1, e.w, 2, '#3a1a1a');
     gfx.rect(e.x, e.y + e.h + 1, (e.w * Math.max(0, e.hp)) / e.maxHp, 2, C.red);
@@ -52,15 +54,23 @@ function drawEnemy(gfx: Gfx, e: Enemy, time: number, frozen: boolean): void {
 function drawWallWarning(gfx: Gfx, run: Run, time: number): void {
   if (run.wallTimer <= 0) return;
   const blink = Math.floor(time * 10) % 2 === 0;
-  gfx.alpha(0.14);
-  gfx.rect(0, laneY(run.wallGap) - 1, W, WALL_GAP * LANE_H, C.green);
+  // Tints and hairlines only: nothing here may hide a danmaku or a bullet.
+  const gy = laneY(run.wallGap) - 1, gh = WALL_GAP * LANE_H;
+  gfx.alpha(0.07);
+  gfx.rect(0, LANE_TOP, W, gy - LANE_TOP, C.red);
+  gfx.rect(0, gy + gh, W, H - gy - gh, C.red);
+  gfx.alpha(0.16);
+  gfx.rect(0, gy, W, gh, C.green);
+  gfx.alpha(0.8);
+  gfx.rect(0, gy, W, 1, C.green);
+  gfx.rect(0, gy + gh - 1, W, 1, C.green);
   gfx.alpha(1);
   for (let i = 0; i < LANES; i++) {
     const safe = i >= run.wallGap && i < run.wallGap + WALL_GAP;
     if (safe) gfx.rect(W - 4, laneY(i) - 1, 4, LANE_H, C.green);
     else if (blink) gfx.rect(W - 5, laneY(i) + 1, 5, LANE_H - 4, C.red);
   }
-  gfx.text('安全区', W - 8, laneY(run.wallGap + 2), C.green, { align: 'r' });
+  gfx.text('安全区', 4, laneY(run.wallGap + 2), C.green);
 }
 
 /** Experience: a green gem. Deliberately a different hue and shape from enemy bullets. */
@@ -205,7 +215,7 @@ function drawPlayer(gfx: Gfx, run: Run, time: number, charIdx: number, gold: boo
   gfx.sprite(img, p.x - 5, p.y - 6, p.face < 0);
 }
 
-function drawHud(gfx: Gfx, ui: Ui, run: Run, o: GameViewOpts): void {
+function drawHud(gfx: Gfx, ui: Ui, run: Run, o: GameViewOpts, top: number): void {
   gfx.rect(0, 0, W, LANE_TOP - 2, C.bar);
   gfx.rect(0, LANE_TOP - 2, W, 1, C.line);
   gfx.rect(0, 0, W, 2, '#23233a');
@@ -230,8 +240,6 @@ function drawHud(gfx: Gfx, ui: Ui, run: Run, o: GameViewOpts): void {
   gfx.text(`Lv${run.level}`, 116, 15, C.green);
   gfx.text(`第${run.wave}/${WAVES}波`, W - 4, 15, C.white, { align: 'r' });
 
-  // Status lines sit below the boss title when one is on screen.
-  const top = run.enemies.some(e => e.kind === 'boss') ? LANE_TOP + 50 : LANE_TOP + 2;
   if (run.combo >= 5) {
     gfx.text(`${run.combo} 连击`, W - 4, top, C.yellow, { align: 'r' });
     gfx.rect(W - 44, top + 13, (40 * Math.max(0, run.comboTimer)) / 3, 1, C.yellow);
@@ -320,7 +328,10 @@ export function drawGame(gfx: Gfx, ui: Ui, run: Run, fx: Fx, input: Input, o: Ga
   g.restore();
 
   const boss = run.enemies.find(e => e.kind === 'boss' && !e.dead);
-  drawHud(gfx, ui, run, o);
+  // Notices and status lines sit below the boss title when one is on screen; a notice pushes the status lines down a row.
+  const top = boss ? LANE_TOP + 50 : LANE_TOP + 2;
+  drawHud(gfx, ui, run, o, top + (fx.toasting ? 14 : 0));
+  fx.drawToast(gfx, top);
   if (boss) {
     gfx.rect(20, LANE_TOP + 1, W - 40, 4, C.ink);
     gfx.rect(21, LANE_TOP + 2, ((W - 42) * Math.max(0, boss.hp)) / boss.maxHp, 2, C.pink);

@@ -47,6 +47,8 @@ export interface Enemy {
   grazeCd: number;
   /** Seconds left of the strike-through shown when 关键词 names it. */
   mark: number;
+  /** Seconds since it was last held against a 置顶牌 (counts down); held danmaku take extra damage. */
+  held: number;
   /** Seconds of slow remaining, and the speed factor while slowed. */
   slow: number;
   slowK: number;
@@ -208,6 +210,8 @@ const ULT_NEED = 40;
 /** How close (px) the player must pass to a danmaku or bullet, without being hit, for a graze. */
 export const GRAZE_R = 5;
 const MAX_ALLIES = 14;
+/** Damage multiplier on a danmaku held against a 置顶牌. */
+export const PIN_VULN = 1.5;
 
 const clamp = (v: number, a: number, b: number): number => (v < a ? a : v > b ? b : v);
 const count = <K extends string>(m: Partial<Record<K, number>>, k: K): number => m[k] ?? 0;
@@ -334,7 +338,7 @@ function mk(run: Run, kind: EnemyKind, text: string, x: number, y: number, scale
   const e: Enemy = {
     id: run.nextId++, kind, text, x, y, w: textWidth(text, scale), h: 12 * scale, scale, vx,
     hp, maxHp: hp, base, tier: 0, xp: 1, coins: 0, color: '#ffffff',
-    t: 0, life: 0, shootCd: 0, flash: 0, starCd: 0, grazeCd: 0, mark: 0, slow: 0, slowK: 1, dead: false, boss: 0, atk: 0, angle: 0, ...o,
+    t: 0, life: 0, shootCd: 0, flash: 0, starCd: 0, grazeCd: 0, mark: 0, held: 0, slow: 0, slowK: 1, dead: false, boss: 0, atk: 0, angle: 0, ...o,
   };
   run.enemies.push(e);
   return e;
@@ -462,6 +466,7 @@ function updateEnemies(run: Run, dt: number): void {
     if (e.starCd > 0) e.starCd -= dt;
     if (e.grazeCd > 0) e.grazeCd -= dt;
     if (e.mark > 0) e.mark -= dt;
+    if (e.held > 0) e.held -= dt;
     if (e.slow > 0) e.slow -= dt;
     if (frozen) continue; // 上热搜: nothing moves, shoots or expires
     e.t += dt;
@@ -497,8 +502,8 @@ function updateEnemies(run: Run, dt: number): void {
       // 置顶牌: a danmaku whose leading edge has not got past the block is held at it.
       for (const pin of run.pins) {
         if (e.y >= pin.y + pin.h || e.y + e.h <= pin.y || e.x >= pin.x + pin.w || e.x + e.w <= pin.x) continue;
-        if (e.vx < 0 && e.x >= pin.x - 3) e.x = pin.x + pin.w;
-        else if (e.vx > 0 && e.x + e.w <= pin.x + pin.w + 3) e.x = pin.x - e.w;
+        if (e.vx < 0 && e.x >= pin.x - 3) { e.x = pin.x + pin.w; e.held = 0.3; }
+        else if (e.vx > 0 && e.x + e.w <= pin.x + pin.w + 3) { e.x = pin.x - e.w; e.held = 0.3; }
       }
       if ((e.vx < 0 && e.x + e.w < -2) || (e.vx > 0 && e.x > W + 2)) e.dead = true;
     }
@@ -584,6 +589,7 @@ function convertHit(run: Run, e: Enemy, dmg: number, ramDmg: number, rams: numbe
 function damage(run: Run, e: Enemy, dmg: number): void {
   if (e.dead) return;
   const crit = run.stats.crit > 0 && run.rng.chance(run.stats.crit);
+  if (e.held > 0) dmg *= PIN_VULN;
   e.hp -= crit ? dmg * 2 : dmg;
   e.flash = 0.1;
   if (run.events.length < 240) run.events.push({ t: 'hit', x: clamp(e.x + e.w / 2, 4, W - 4), y: e.y + e.h / 2, b: crit });
@@ -709,9 +715,16 @@ function placePin(run: Run, st: WeaponStats): void {
     const cx = clamp(sx, 2, W - w - 2);
     if (!taken(cx, laneY(sl))) { x = cx; y = laneY(sl); break; }
   }
-  while (run.pins.length >= st.count) run.pins.shift();
+  while (run.pins.length >= st.count) burstPin(run, run.pins.shift()!, st);
   run.pins.push({ x, y, w, h: 12, life: st.dur, max: st.dur, tick: 0, pulse: st.cd2 });
   run.events.push({ t: 'pin', x: x + w / 2, y: y + 6 });
+}
+
+/** A 置顶牌 goes out with a bang. */
+function burstPin(run: Run, pin: Pin, st: WeaponStats): void {
+  const cx = pin.x + pin.w / 2, cy = pin.y + pin.h / 2;
+  areaDamage(run, cx, cy, st.radius, st.dmg2 * run.stats.dmgMul);
+  if (run.events.length < 240) run.events.push({ t: 'blast', x: cx, y: cy, n: st.radius, b: true });
 }
 
 function updatePins(run: Run, dt: number): void {
@@ -724,7 +737,7 @@ function updatePins(run: Run, dt: number): void {
     for (const b of run.bullets) if (b.x > pin.x - 2 && b.x < pin.x + pin.w + 2 && b.y > pin.y - 2 && b.y < pin.y + pin.h + 2) b.life = 0;
     if (!st) continue;
     if ((pin.tick -= dt) <= 0) {
-      pin.tick = 0.4;
+      pin.tick = 0.3;
       for (const e of run.enemies) {
         if (!e.dead && e.x < pin.x + pin.w + 2 && e.x + e.w > pin.x - 2 && e.y < pin.y + pin.h && e.y + e.h > pin.y) damage(run, e, st.dmg * dm);
       }
@@ -736,6 +749,7 @@ function updatePins(run: Run, dt: number): void {
       if (run.events.length < 240) run.events.push({ t: 'blast', x: cx, y: cy, n: st.radius });
     }
   }
+  if (st) for (const pin of run.pins) if (pin.life <= 0) burstPin(run, pin, st);
   run.pins = run.pins.filter(q => q.life > 0);
 }
 

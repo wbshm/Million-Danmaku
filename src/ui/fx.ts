@@ -18,6 +18,8 @@ export class Fx {
   flash = 0;
   flashColor = '#ffffff';
   banner: { text: string; sub: string; color: string; t: number; dur: number } | null = null;
+  /** One-line notice under the HUD. Used for anything announced mid-fight, so nothing on the field is covered. */
+  toastMsg: { text: string; color: string; t: number; dur: number; blink: boolean } | null = null;
 
   reset(): void {
     this.parts = [];
@@ -28,6 +30,7 @@ export class Fx {
     this.shake = 0;
     this.flash = 0;
     this.banner = null;
+    this.toastMsg = null;
   }
 
   burst(x: number, y: number, color: string, n: number, speed = 50): void {
@@ -59,8 +62,30 @@ export class Fx {
     this.bolts.push({ x, y, life: 0.14, pts });
   }
 
+  /** Big centre banner: only for moments when the field is empty (wave start, run over). */
   say(text: string, color: string, dur = 1.6, sub = ''): void {
     this.banner = { text, sub, color, t: 0, dur };
+  }
+
+  toast(text: string, color: string, dur = 1.6, blink = false): void {
+    this.toastMsg = { text, color, t: 0, dur, blink };
+  }
+
+  get toasting(): boolean {
+    return this.toastMsg !== null;
+  }
+
+  /** Draw the current toast as a single line whose top edge is at `y`. */
+  drawToast(gfx: Gfx, y: number): void {
+    const m = this.toastMsg;
+    if (!m) return;
+    const k = Math.max(0, Math.min(1, m.t / 0.12, (m.dur - m.t) / 0.2));
+    const w = gfx.textW(m.text) + 10;
+    gfx.alpha(0.6 * k);
+    gfx.rect(Math.round((W - w) / 2), y - 1, w, 14, '#000000');
+    gfx.alpha(k);
+    gfx.text(m.text, W / 2, y, m.blink && Math.floor(m.t * 8) % 2 ? '#f4f4f4' : m.color, { align: 'c' });
+    gfx.alpha(1);
   }
 
   update(dt: number): void {
@@ -77,6 +102,7 @@ export class Fx {
     this.shake = Math.max(0, this.shake - 26 * dt);
     this.flash = Math.max(0, this.flash - dt);
     if (this.banner && (this.banner.t += dt) >= this.banner.dur) this.banner = null;
+    if (this.toastMsg && (this.toastMsg.t += dt) >= this.toastMsg.dur) this.toastMsg = null;
   }
 
   offset(): [number, number] {
@@ -138,7 +164,7 @@ export class Fx {
     if (!b) return;
     const k = Math.min(1, b.t / 0.15, (b.dur - b.t) / 0.25);
     const y = Math.round(H * 0.28);
-    gfx.alpha(0.72 * k);
+    gfx.alpha(0.5 * k);
     gfx.rect(0, y - 6, W, b.sub ? 50 : 36, '#000000');
     gfx.alpha(k);
     gfx.text(b.text, W / 2, y, b.color, { scale: 2, align: 'c' });

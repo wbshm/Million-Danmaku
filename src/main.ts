@@ -320,24 +320,24 @@ function handleEvents(events: GameEvent[]): void {
         sound.play('blast');
         break;
       case 'nova': fx.ring(x, y, 260, C.yellow, 0.5); fx.ring(x, y, 180, C.white, 0.4); fx.shake = 6; break;
-      case 'ult': fx.say(e.s ?? '', C.yellow, 1.1); fx.flash = 0.25; fx.flashColor = C.white; sound.play('ult'); break;
-      case 'fuse': fx.say(`合成：${e.s ?? ''}`, C.yellow, 1.8, '两把武器合二为一'); sound.play('fuse'); break;
+      case 'ult': fx.toast(`专属技能：${e.s ?? ''}`, C.yellow, 1.1); fx.flash = 0.25; fx.flashColor = C.white; sound.play('ult'); break;
+      case 'fuse': fx.toast(`合成：${e.s ?? ''}`, C.yellow, 1.8, true); sound.play('fuse'); break;
       case 'shoot': sound.play('shoot'); break;
       case 'pick': sound.play('pick'); break;
       case 'hurt': fx.shake = 7; fx.flash = 0.3; fx.flashColor = C.red; sound.play('hurt'); break;
-      case 'revive': fx.say('复活币生效', C.green, 1.4); fx.flash = 0.4; fx.flashColor = C.white; sound.play('revive'); break;
+      case 'revive': fx.toast('复活币生效', C.green, 1.4); fx.flash = 0.4; fx.flashColor = C.white; sound.play('revive'); break;
       case 'level': ui.lock(420); sound.play('level'); break;
       case 'shop': ui.lock(500); break;
       case 'choose': sound.play('choose'); break;
       case 'buy': sound.play('buy'); break;
       case 'reroll': sound.play('ui'); break;
-      case 'warn': fx.say('刷屏来袭', C.red, 1.2, '躲进绿色安全区'); sound.play('warn'); break;
-      case 'boss': fx.say(`Boss：${e.s ?? ''}`, C.pink, 2); fx.shake = 5; sound.play('boss'); break;
+      case 'warn': fx.toast('刷屏来袭 · 躲进绿色安全区', C.red, 1.3, true); sound.play('warn'); break;
+      case 'boss': fx.toast(`Boss：${e.s ?? ''}`, C.pink, 2, true); fx.shake = 5; sound.play('boss'); break;
       case 'waveStart':
         if ((e.n ?? 1) > 1) { fx.say(`第 ${e.n} 波`, C.white, 1.3, BOSS_WAVES.includes(e.n ?? 0) ? 'Boss 出没' : ''); sound.play('wave'); }
         break;
       case 'million':
-        fx.say('百万UP主！', C.yellow, 2.6, '粉丝突破 1,000,000');
+        fx.toast('百万UP主！粉丝突破 100 万', C.yellow, 2.6, true);
         fx.flash = 0.5;
         fx.flashColor = C.yellow;
         fx.burst(W / 2, H * 0.3, C.yellow, 60, 140);

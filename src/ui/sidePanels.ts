@@ -8,9 +8,9 @@ import { H, W, WAVES } from '../game/balance';
 import { PASSIVES } from '../game/passives';
 import { PERK_ROWS, isTriple } from '../game/perks';
 import { RELICS } from '../game/relics';
-import { scoreCtx, timeLeft, type Run } from '../game/run';
+import { damageShares, scoreCtx, timeLeft, type Run } from '../game/run';
 import { FUSE_LEVEL } from '../game/weapons';
-import { drawRecipes } from './overlays';
+import { drawRecipes, drawShares } from './overlays';
 import { comboMult, multiplier } from '../game/scoring';
 import { WEAPON_BY_ID } from '../game/weapons';
 import type { RankItem } from '../platform/toy';
@@ -31,7 +31,7 @@ const HOW_TO = [
   '机制武器各有玩法：点名关键字、洗白、置顶挡路、站住蓄力……',
   '每波结束用硬币买遗物：加法加倍率，乘法翻倍率。',
   '每局结算得灵感，去科技树换永久加成。',
-  '目标：一局涨粉 100 万。',
+  '一局 20 波，每 5 波一个会动的 Boss。目标：涨粉 100 万，再冲亿。',
 ];
 
 const KEYS: [string, string][] = [
@@ -140,6 +140,11 @@ export function drawSides(gfx: Gfx, ui: Ui, s: SideState): void {
     y = pair('充能', `${Math.floor(run.ult.energy)} / ${run.ult.need}`, rx, y + 2, run.ult.energy >= run.ult.need ? C.yellow : C.white);
     y = head('合成进度', rx, y + 6);
     y = drawRecipes(gfx, run, rx, y, w, true) + 4;
+    const shares = damageShares(run, 5);
+    if (shares.length && y < H - 110) {
+      y = head('输出占比', rx, y + 2);
+      y = drawShares(gfx, shares, rx, y, w, 1) + 6;
+    }
   }
   y = head('操作', rx, y);
   for (const [k, v] of KEYS) { if (y > H - 14) break; y = pair(k, v, rx, y); }

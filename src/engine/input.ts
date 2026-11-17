@@ -27,9 +27,13 @@ export class Input {
   onKey: (code: string) => void = () => {};
   onFirstGesture: () => void = () => {};
 
-  constructor(canvas: HTMLCanvasElement, toLogical: (cx: number, cy: number) => [number, number]) {
+  constructor(private readonly canvas: HTMLCanvasElement, toLogical: (cx: number, cy: number) => [number, number]) {
+    canvas.tabIndex = 0; // focusable, so the keyboard can be pointed at the game
     canvas.addEventListener('pointerdown', e => {
+      // Cancelling the press also cancels "clicking moves keyboard focus here". On B站 the game
+      // runs inside an iframe, so without taking focus by hand the keys stay with the outer page.
       e.preventDefault();
+      this.takeFocus();
       this.onFirstGesture();
       this.desktop = e.pointerType === 'mouse';
       if (!this.desktop) this.hover = null;
@@ -79,6 +83,19 @@ export class Input {
   clear(): void {
     this.keys.clear();
     this.stick = null;
+  }
+
+  /** Point the keyboard at the game (this window, then the canvas). */
+  takeFocus(): void {
+    try {
+      window.focus();
+      this.canvas.focus({ preventScroll: true });
+    } catch { /* focus can be refused; the next press tries again */ }
+  }
+
+  /** Whether key presses currently reach the game. */
+  get focused(): boolean {
+    return typeof document.hasFocus !== 'function' || document.hasFocus();
   }
 
   /** Movement vector with magnitude 0..1. */

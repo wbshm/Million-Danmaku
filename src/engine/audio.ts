@@ -151,6 +151,7 @@ export class Sound {
       case 'deny': this.tone(180, 0.12, 'square', 0.07, 140); break;
       case 'ui': this.tone(740, 0.04, 'square', 0.05); break;
       case 'warn': [0, 0.16, 0.32].forEach(d => this.tone(880, 0.1, 'square', 0.08, 0, c.currentTime + d)); break;
+      case 'bossdown': this.tone(240, 0.7, 'sawtooth', 0.14, 36); this.tone(120, 0.5, 'square', 0.08, 30); this.noise(0.6, 0.16); break;
       case 'boss': this.tone(110, 0.6, 'sawtooth', 0.14, 55); this.noise(0.3, 0.1); break;
       case 'wave': this.tone(392, 0.09, 'square', 0.07); this.tone(587, 0.16, 'square', 0.07, 0, c.currentTime + 0.09); break;
       case 'million':

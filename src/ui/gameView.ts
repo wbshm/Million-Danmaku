@@ -1,7 +1,7 @@
 /** Draws the play field and HUD for a run. */
 import type { Input } from '../engine/input';
 import { fmtInt, fmtMult, type Gfx } from '../engine/renderer';
-import { charSprites, goldSprites, icons } from '../engine/sprites';
+import { charSprites, millionSprites, icons } from '../engine/sprites';
 import { H, LANES, LANE_H, LANE_TOP, W, WAVES, laneY, waveDuration } from '../game/balance';
 import { CHARS } from '../game/chars';
 import { PASSIVES } from '../game/passives';
@@ -48,6 +48,23 @@ function drawEnemy(gfx: Gfx, e: Enemy, time: number, frozen: boolean): void {
   if (e.kind === 'big' && e.hp < e.maxHp) {
     gfx.rect(e.x, e.y + e.h + 1, e.w, 2, '#3a1a1a');
     gfx.rect(e.x, e.y + e.h + 1, (e.w * Math.max(0, e.hp)) / e.maxHp, 2, C.red);
+  }
+}
+
+/** A boss about to drop: mark the column it will fall through and the spot where it lands. */
+function drawSlamWarning(gfx: Gfx, run: Run, time: number): void {
+  for (const e of run.enemies) {
+    if (e.dead || e.kind !== 'boss' || (e.mode !== 1 && e.mode !== 2)) continue;
+    const y0 = e.y + e.h, y1 = e.ty + e.h;
+    const blink = Math.floor(time * 12) % 2 === 0;
+    gfx.alpha(e.mode === 2 ? 0.22 : blink ? 0.16 : 0.08);
+    gfx.rect(e.x, y0, e.w, Math.max(0, y1 - y0), C.red);
+    gfx.alpha(0.9);
+    gfx.rect(e.x, y0, 1, Math.max(0, y1 - y0), C.red);
+    gfx.rect(e.x + e.w - 1, y0, 1, Math.max(0, y1 - y0), C.red);
+    if (blink) gfx.frame(e.x, e.ty, e.w, e.h, C.red);
+    gfx.alpha(1);
+    if (e.mode === 1) gfx.text('!', e.x + e.w / 2 - 3, e.ty + e.h / 2 - 6, blink ? C.yellow : C.red);
   }
 }
 
@@ -204,15 +221,18 @@ function drawWeapons(gfx: Gfx, run: Run, time: number): void {
   }
 }
 
-function drawPlayer(gfx: Gfx, run: Run, time: number, charIdx: number, gold: boolean): void {
+function drawPlayer(gfx: Gfx, run: Run, time: number, charIdx: number, gold: boolean, cheer: number): void {
   const p = run.player;
   if (p.iframes > 0 && run.phase !== 'over' && Math.floor(time * 14) % 2 === 0) return;
-  const set = gold ? goldSprites : charSprites[charIdx] ?? charSprites[0];
-  const img = p.moving && Math.floor(time * 8) % 2 ? set.b : set.a;
+  const set = (gold ? millionSprites : charSprites)[charIdx] ?? charSprites[0];
+  const img = (cheer > 0 || p.moving) && Math.floor(time * 8) % 2 ? set.b : set.a;
   gfx.alpha(0.3);
   gfx.rect(p.x - 4, p.y + 6, 8, 2, C.black);
   gfx.alpha(1);
-  gfx.sprite(img, p.x - 5, p.y - 6, p.face < 0);
+  // Taller sprites (the crown) grow upwards; `cheer` is the victory hop.
+  const top = p.y + 6 - img.height - Math.round(cheer);
+  gfx.sprite(img, p.x - 5, top, p.face < 0);
+  if (gold && Math.floor(time * 5 + charIdx) % 4 === 0) gfx.rect(p.x + (Math.floor(time * 5) % 8 < 4 ? -7 : 6), top + 2, 1, 1, C.white);
 }
 
 function drawHud(gfx: Gfx, ui: Ui, run: Run, o: GameViewOpts, top: number): void {
@@ -298,6 +318,8 @@ function drawHud(gfx: Gfx, ui: Ui, run: Run, o: GameViewOpts, top: number): void
 export interface GameViewOpts {
   time: number;
   gold: boolean;
+  /** Victory hop height in px (0 = standing). */
+  cheer?: number;
   hint: boolean;
   /** Mouse / keyboard player: word the hints for them. */
   desktop: boolean;
@@ -313,6 +335,7 @@ export function drawGame(gfx: Gfx, ui: Ui, run: Run, fx: Fx, input: Input, o: Ga
   g.translate(sx, sy);
 
   drawWallWarning(gfx, run, o.time);
+  drawSlamWarning(gfx, run, o.time);
   for (const orb of run.orbs) {
     if (orb.kind === 'xp') drawXp(gfx, orb.x, orb.y, o.time);
     else if (orb.kind === 'coin') gfx.sprite(icons.coin, orb.x - 3, orb.y - 3);
@@ -322,7 +345,7 @@ export function drawGame(gfx: Gfx, ui: Ui, run: Run, fx: Fx, input: Input, o: Ga
   for (const e of run.enemies) if (!e.dead) drawEnemy(gfx, e, o.time, frozen);
   drawFriends(gfx, run, o.time);
   drawWeapons(gfx, run, o.time);
-  drawPlayer(gfx, run, o.time, CHARS.indexOf(run.char), o.gold);
+  drawPlayer(gfx, run, o.time, CHARS.indexOf(run.char), o.gold, o.cheer ?? 0);
   for (const b of run.bullets) drawBullet(gfx, b.x, b.y, o.time);
   fx.drawWorld(gfx);
   g.restore();

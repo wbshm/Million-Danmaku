@@ -2,7 +2,7 @@
 import type { Gfx } from '../engine/renderer';
 import { H, LANE_TOP, W } from '../game/balance';
 
-interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number }
+interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; /** Falls at a steady speed. */ light?: boolean }
 interface Float { text: string; x: number; y: number; life: number; color: string; scale: number }
 interface Ring { x: number; y: number; r: number; life: number; max: number; color: string }
 interface Beam { y: number; half: number; life: number }
@@ -38,6 +38,14 @@ export class Fx {
       const a = Math.random() * Math.PI * 2, v = speed * (0.4 + Math.random() * 0.8);
       const life = 0.25 + Math.random() * 0.3;
       this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 10, life, max: life, color, size: Math.random() < 0.3 ? 2 : 1 });
+    }
+  }
+
+  /** Slow paper bits falling from the top edge. */
+  confetti(n: number, colors: readonly string[]): void {
+    for (let i = 0; i < n && this.parts.length < 320; i++) {
+      const life = 1.2 + Math.random() * 0.9;
+      this.parts.push({ x: Math.random() * W, y: LANE_TOP - 4, vx: Math.random() * 30 - 15, vy: 40 + Math.random() * 50, life, max: life, color: colors[Math.floor(Math.random() * colors.length)], size: Math.random() < 0.5 ? 2 : 1, light: true });
     }
   }
 
@@ -89,7 +97,7 @@ export class Fx {
   }
 
   update(dt: number): void {
-    for (const p of this.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 90 * dt; p.life -= dt; }
+    for (const p of this.parts) { p.x += p.vx * dt; p.y += p.vy * dt; if (!p.light) p.vy += 90 * dt; p.life -= dt; }
     this.parts = this.parts.filter(p => p.life > 0);
     for (const f of this.floats) { f.y -= 22 * dt; f.life -= dt; }
     this.floats = this.floats.filter(f => f.life > 0);

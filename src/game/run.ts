@@ -53,15 +53,24 @@ export interface Enemy {
   slow: number;
   slowK: number;
   dead: boolean;
-  boss: 0 | 1 | 2;
+  boss: 0 | 1 | 2 | 3 | 4;
   atk: number;
   angle: number;
+  /** Boss only. Body slam: 0 none, 1 warning, 2 dropping, 3 landed, 4 climbing back. */
+  mode: number;
+  modeT: number;
+  /** Where the slam lands, and the height it climbs back to. */
+  ty: number;
+  homeY: number;
+  vy: number;
+  /** Attacks made so far; picks the next one. */
+  n: number;
 }
 
 export interface Bullet { x: number; y: number; vx: number; vy: number; life: number; grazed: boolean }
 
 /** 粉丝弹幕: a defeated danmaku that changed sides. It flies back along its row, ramming enemies and soaking bullets. */
-export interface Ally { text: string; x: number; y: number; w: number; h: number; scale: number; vx: number; dmg: number; hits: number; hit: number[] }
+export interface Ally { src: string; text: string; x: number; y: number; w: number; h: number; scale: number; vx: number; dmg: number; hits: number; hit: number[] }
 
 /** 置顶牌: a block standing in a row. Danmaku cannot scroll past it. */
 export interface Pin { x: number; y: number; w: number; h: number; life: number; max: number; tick: number; pulse: number }
@@ -70,6 +79,8 @@ export interface Shot {
   kind: 'like' | 'triple' | 'share' | 'coin' | 'storm' | 'drone' | 'rewind' | 'glyph' | 'dart';
   /** The character a 'glyph' shot is drawn as. */
   ch?: string;
+  /** Weapon credited with this shot's damage. */
+  src: string;
   x: number;
   y: number;
   vx: number;
@@ -173,6 +184,10 @@ export interface Run {
   /** The character(s) 关键词 last named, and how long to keep showing them. */
   keyword: { s: string; t: number };
   bossKills: number;
+  /** Damage dealt so far, by weapon id ('ult' = the exclusive skill). */
+  dmgBy: Record<string, number>;
+  /** Who the damage being dealt right now is credited to. */
+  src: string;
   passives: Partial<Record<PassiveId, number>>;
   relics: Partial<Record<RelicId, number>>;
   combo: number;
@@ -230,7 +245,7 @@ export function createRun(seed: number, charIdx = 0, perks: Perks = NO_PERKS, te
     fans: 0, coins: ch.coins + tech.coins + (perks.coin ? PERK_COIN_COINS : 0), xp: 0, level: 1, xpNext: xpForLevel(1), pendingLevels: 0,
     weapons: [ch.weapon, ...(ch.weapon2 ? [ch.weapon2] : [])].map((id, i) => ({ id, lvl: 1, cd: 0.6 + i * 0.2, cd2: 0.8 })), passives: {}, relics: {},
     ult: { energy: tech.ultStart ? ULT_NEED : 0, need: ULT_NEED, uses: 0 }, buff: { haste: 0, fans: 0, freeze: 0 },
-    tech, lvRerolls: tech.lvRerolls, grazes: 0, remixN: 0, hold: 0, keyword: { s: '', t: 0 }, bossKills: 0,
+    tech, lvRerolls: tech.lvRerolls, grazes: 0, remixN: 0, hold: 0, keyword: { s: '', t: 0 }, bossKills: 0, dmgBy: {}, src: '',
     combo: 0, comboTimer: 0, maxCombo: 0, kills: 0, hurtCount: 0, dailyBonus: 0, levelBonus: 0,
     choices: null, shop: null, rerollCost: 3, freeRerolls: 0, millionAt: null, nextId: 1,
     spawnCd: 1, bigCd: 0, fixedCd: 0, spamIdx: 0, wallTimer: 0, wallGap: 0,
@@ -338,7 +353,7 @@ function mk(run: Run, kind: EnemyKind, text: string, x: number, y: number, scale
   const e: Enemy = {
     id: run.nextId++, kind, text, x, y, w: textWidth(text, scale), h: 12 * scale, scale, vx,
     hp, maxHp: hp, base, tier: 0, xp: 1, coins: 0, color: '#ffffff',
-    t: 0, life: 0, shootCd: 0, flash: 0, starCd: 0, grazeCd: 0, mark: 0, held: 0, slow: 0, slowK: 1, dead: false, boss: 0, atk: 0, angle: 0, ...o,
+    t: 0, life: 0, shootCd: 0, flash: 0, starCd: 0, grazeCd: 0, mark: 0, held: 0, slow: 0, slowK: 1, dead: false, boss: 0, atk: 0, angle: 0, mode: 0, modeT: 0, ty: 0, homeY: y, vy: 0, n: 0, ...o,
   };
   run.enemies.push(e);
   return e;
@@ -402,7 +417,7 @@ function announceWall(run: Run): void {
 function spawnWall(run: Run): void {
   const c = run.cfg, r = run.rng;
   const text = r.pick(SPAM_TEXT);
-  const sp = 78 + 2 * run.wave;
+  const sp = 78 + 2 * Math.min(run.wave, 10) + 0.8 * Math.max(0, run.wave - 10);
   for (let i = 0; i < LANES; i++) {
     if (i >= run.wallGap && i < run.wallGap + WALL_GAP) continue;
     mk(run, 'wall', text, W + 2 + r.range(0, 8), laneY(i), 1, -sp, c.hp * 0.6, c.base, { xp: r.chance(0.4) ? 1 : 0, color: '#ff9ec0' });
@@ -411,11 +426,11 @@ function spawnWall(run: Run): void {
 
 function spawnBoss(run: Run): void {
   const c = run.cfg;
-  const which = c.boss as 1 | 2;
+  const which = c.boss as 1 | 2 | 3 | 4;
   const text = BOSS_NAME[which];
-  const w = textWidth(text, 3);
-  mk(run, 'boss', text, (W - w) / 2, LANE_TOP + 8, 3, 0, c.hp * (which === 1 ? 45 : 70), c.base * 150, {
-    xp: 30, tier: 2, coins: 20, color: '#fb7299', boss: which, atk: 3,
+  const w = textWidth(text, BOSS_SCALE);
+  mk(run, 'boss', text, (W - w) / 2, BOSS_Y + (which === 2 ? 34 : 0), BOSS_SCALE, 0, c.hp * BOSS_HP[which], c.base * 150, {
+    xp: 30, tier: 2, coins: 20 + 5 * which, color: BOSS_COLOR[which], boss: which, atk: 3, homeY: BOSS_Y,
   });
   run.bossSpawned = true;
   run.events.push({ t: 'boss', s: text });
@@ -457,6 +472,140 @@ function shootFan(run: Run, x: number, y: number, n: number, spread: number, spe
   for (let i = 0; i < n; i++) shootBullet(run, x, y, a + (i - (n - 1) / 2) * spread, speed);
 }
 
+// ---------------------------------------------------------------- bosses
+
+export const BOSS_SCALE = 2;
+const BOSS_Y = LANE_TOP + 8;
+/** Health as a multiple of an ordinary danmaku of that wave. */
+const BOSS_HP: Record<1 | 2 | 3 | 4, number> = { 1: 45, 2: 70, 3: 90, 4: 140 };
+const BOSS_COLOR: Record<1 | 2 | 3 | 4, string> = { 1: '#fb7299', 2: '#b48cff', 3: '#ff8a5c', 4: '#ff5a6e' };
+/** How far down the field a roaming boss may come. */
+const BOSS_FLOOR = H * 0.5;
+
+function shootRing(run: Run, x: number, y: number, n: number, speed: number, off = 0): void {
+  for (let i = 0; i < n; i++) shootBullet(run, x, y, off + (i * Math.PI * 2) / n, speed);
+}
+
+/** A row of bullets falling from the top edge with one gap to slip through. */
+function shootRain(run: Run, speed: number): void {
+  const gap = run.rng.range(12, W - 60);
+  for (let x = 8; x < W - 4; x += 18) if (x < gap || x > gap + 48) shootBullet(run, x, LANE_TOP + 2, Math.PI / 2, speed);
+}
+
+/** 护体: two small danmaku peel off the boss and scroll away, soaking up shots on the way. */
+function spawnGuards(run: Run, e: Enemy): void {
+  const c = run.cfg;
+  const lane = clamp(Math.round((e.y + e.h / 2 - LANE_TOP) / LANE_H), 1, LANES - 2);
+  for (const k of [-1, 1]) {
+    mk(run, 'scroll', '护体', e.x + e.w / 2 - 12, laneY(lane + k), 1, k * (34 + run.wave), c.hp * 2.5, c.base, { color: '#d9c2ff' });
+  }
+}
+
+function startSlam(run: Run, e: Enemy): void {
+  e.mode = 1;
+  e.modeT = e.boss === 1 ? 1.05 : 0.9;
+  e.homeY = e.y;
+  e.ty = clamp(run.player.y - e.h / 2, e.y + 24, H - 30 - e.h);
+  run.events.push({ t: 'slamWarn' });
+}
+
+function slamStep(run: Run, e: Enemy, dt: number): void {
+  if (e.mode === 1) {
+    if ((e.modeT -= dt) <= 0) e.mode = 2;
+  } else if (e.mode === 2) {
+    e.y += 300 * dt;
+    if (e.y >= e.ty) {
+      e.y = e.ty;
+      e.mode = 3;
+      e.modeT = 0.55;
+      const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
+      shootRing(run, cx, cy, e.boss === 4 ? 14 : 8, e.boss === 4 ? 52 : 46, run.rng.range(0, 1));
+      run.events.push({ t: 'slam', x: cx, y: cy });
+    }
+  } else if (e.mode === 3) {
+    if ((e.modeT -= dt) <= 0) e.mode = 4;
+  } else {
+    e.y -= 120 * dt;
+    if (e.y <= e.homeY) { e.y = e.homeY; e.mode = 0; }
+  }
+}
+
+/**
+ * Four bosses, none of which sits still:
+ *  1 高能预警  shadows the player along the top, fires aimed fans and drops on them (warned by a red column)
+ *  2 弹幕护体  weaves a figure of eight, sprays spirals, peels off 护体 danmaku
+ *  3 直播事故  bounces around the upper half, rains rows of bullets with one gap
+ *  4 百万黑粉  does all three in turn as its health falls, then speeds up below a third
+ */
+function updateBoss(run: Run, e: Enemy, dt: number): void {
+  if (!e.boss) return;
+  if (e.mode !== 0) { slamStep(run, e, dt); return; }
+  const p = run.player;
+  const k = e.hp / e.maxHp;
+  const final = e.boss === 4;
+  const rage = final && k <= 0.33;
+  const style = final ? (k > 0.66 ? 1 : k > 0.33 ? 3 : 1) : e.boss;
+
+  if (style === 1) {
+    e.vx = e.vy = 0;
+    if (final && e.y > BOSS_Y) e.y = Math.max(BOSS_Y, e.y - 90 * dt); // back up from the roaming phase
+    const v = (rage ? 64 : 38) * dt;
+    e.x += clamp(clamp(p.x - e.w / 2, 2, W - e.w - 2) - e.x, -v, v);
+  } else if (style === 2) {
+    e.x = (W - e.w) / 2 + Math.sin(e.t * 0.6) * 50;
+    e.y = BOSS_Y + 34 + Math.sin(e.t * 1.2) * 30;
+  } else {
+    if (!e.vx && !e.vy) { e.vx = p.x < W / 2 ? -46 : 46; e.vy = 32; }
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
+    const side = (e.x < 2 && e.vx < 0) || (e.x > W - e.w - 2 && e.vx > 0);
+    if (side) {
+      e.vx = -e.vx;
+      shootRing(run, e.x + e.w / 2, e.y + e.h / 2, 6, 44, run.rng.range(0, 1));
+    }
+    if ((e.y < BOSS_Y && e.vy < 0) || (e.y > BOSS_FLOOR && e.vy > 0)) e.vy = -e.vy;
+  }
+
+  const cx = e.x + e.w / 2, cy = e.y + e.h;
+  // Spirals come in bursts with a breather between them.
+  if (e.boss === 2 || (final && style === 3)) {
+    e.shootCd -= dt;
+    if (e.t % 5 < 2.6 && e.shootCd <= 0) {
+      e.shootCd = 0.26;
+      e.angle += 0.45;
+      shootBullet(run, cx, e.y + e.h / 2, e.angle, 48);
+      shootBullet(run, cx, e.y + e.h / 2, e.angle + Math.PI, 48);
+    }
+  }
+  if ((e.atk -= dt) > 0) return;
+  const n = e.n++;
+  if (e.boss === 1) {
+    e.atk = 2.6;
+    if (n % 4 === 1) startSlam(run, e);
+    else if (n % 4 === 3) announceWall(run);
+    else shootFan(run, cx, cy, 5, 0.3, 55);
+  } else if (e.boss === 2) {
+    e.atk = 5.5;
+    if (n % 2 === 0) spawnGuards(run, e); else announceWall(run);
+  } else if (e.boss === 3) {
+    e.atk = 2.8;
+    if (n % 3 === 1) shootFan(run, cx, cy, 7, 0.26, 58); else shootRain(run, 56);
+  } else if (rage) {
+    e.atk = 1.8;
+    if (n % 2 === 0) startSlam(run, e);
+    else if (n % 4 === 1) { shootRing(run, cx, e.y + e.h / 2, 14, 54, run.rng.range(0, 1)); spawnGuards(run, e); }
+    else announceWall(run);
+  } else if (style === 1) {
+    e.atk = 2.4;
+    if (n % 4 === 1) startSlam(run, e);
+    else if (n % 4 === 3) shootRain(run, 58);
+    else shootFan(run, cx, cy, 7, 0.26, 58);
+  } else {
+    e.atk = 4.5;
+    if (n % 2 === 0) spawnGuards(run, e); else shootRain(run, 56);
+  }
+}
+
 function updateEnemies(run: Run, dt: number): void {
   const sp = run.stats.enemySpeed;
   const frozen = run.buff.freeze > 0;
@@ -475,28 +624,11 @@ function updateEnemies(run: Run, dt: number): void {
       e.shootCd -= dt;
       if (e.shootCd <= 0) {
         e.shootCd = 1.5;
-        shootFan(run, e.x + e.w / 2, e.y + 6, 1, 0, 46 + 2 * run.wave);
+        shootFan(run, e.x + e.w / 2, e.y + 6, 1, 0, run.cfg.shot);
       }
       if (e.life <= 0) e.dead = true;
     } else if (e.kind === 'boss') {
-      e.x = (W - e.w) / 2 + Math.sin(e.t * 0.7) * 28;
-      const cx = e.x + e.w / 2, cy = e.y + e.h;
-      e.atk -= dt;
-      if (e.boss === 1) {
-        if (e.atk <= 0) {
-          e.atk = 2.8;
-          if (e.angle++ % 2 === 0) shootFan(run, cx, cy, 5, 0.3, 55); else announceWall(run);
-        }
-      } else {
-        e.shootCd -= dt;
-        if (e.t % 5 < 2.6 && e.shootCd <= 0) {
-          e.shootCd = 0.26;
-          e.angle += 0.45;
-          shootBullet(run, cx, cy, e.angle, 48);
-          shootBullet(run, cx, cy, e.angle + Math.PI, 48);
-        }
-        if (e.atk <= 0) { e.atk = 6.5; announceWall(run); }
-      }
+      updateBoss(run, e, dt);
     } else {
       e.x += e.vx * sp * (e.slow > 0 ? e.slowK : 1) * dt;
       // 置顶牌: a danmaku whose leading edge has not got past the block is held at it.
@@ -544,9 +676,10 @@ function kill(run: Run, e: Enemy): void {
   if (e.coins) dropOrb(run, 'coin', cx + run.rng.range(-8, 8), cy + run.rng.range(-4, 4), e.coins);
   if (e.kind === 'big' && run.rng.chance(0.08)) dropOrb(run, 'heart', cx, cy + 6, 1);
   if (e.kind === 'boss') {
-    if (e.boss === 1) dropOrb(run, 'heart', cx, cy + 10, 1);
+    if (run.wave < WAVES) dropOrb(run, 'heart', cx, cy + 10, 1);
     run.bossKilled = true;
     run.bossKills++;
+    run.events.push({ t: 'bossDown', x: cx, y: cy, s: e.text, n: e.boss });
   }
   // 鬼畜 / 名场面: every few kills the fallen danmaku is cut into its characters.
   const rm = run.weapons.find(w => w.id === 'remix' || w.id === 'scene');
@@ -554,7 +687,11 @@ function kill(run: Run, e: Enemy): void {
     const st = weaponStats(rm.id, rm.lvl);
     if (++run.remixN >= st.count) {
       run.remixN = 0;
+      // The glyphs belong to 鬼畜, whatever landed the kill.
+      const by = run.src;
+      credit(run, rm.id);
       burstGlyphs(run, e, st.dmg * run.stats.dmgMul, st.pierce);
+      credit(run, by);
     }
   }
 }
@@ -582,7 +719,7 @@ function convertHit(run: Run, e: Enemy, dmg: number, ramDmg: number, rams: numbe
   damage(run, e, dmg);
   if (!e.dead || e.kind === 'boss' || run.allies.length >= MAX_ALLIES) return;
   const dir = e.vx > 0 ? -1 : e.vx < 0 ? 1 : e.x + e.w / 2 < W / 2 ? 1 : -1;
-  run.allies.push({ text: e.text, x: e.x, y: e.y, w: e.w, h: e.h, scale: e.scale, vx: dir * 95, dmg: ramDmg * e.scale, hits: rams, hit: [] });
+  run.allies.push({ src: run.src, text: e.text, x: e.x, y: e.y, w: e.w, h: e.h, scale: e.scale, vx: dir * 95, dmg: ramDmg * e.scale, hits: rams, hit: [] });
   if (run.events.length < 240) run.events.push({ t: 'convert', x: clamp(e.x + e.w / 2, 8, W - 8), y: e.y });
 }
 
@@ -590,7 +727,10 @@ function damage(run: Run, e: Enemy, dmg: number): void {
   if (e.dead) return;
   const crit = run.stats.crit > 0 && run.rng.chance(run.stats.crit);
   if (e.held > 0) dmg *= PIN_VULN;
-  e.hp -= crit ? dmg * 2 : dmg;
+  if (crit) dmg *= 2;
+  // Credit what actually came off the health bar, so overkill does not inflate a weapon's share.
+  if (run.src) run.dmgBy[run.src] = (run.dmgBy[run.src] ?? 0) + Math.min(dmg, Math.max(0, e.hp));
+  e.hp -= dmg;
   e.flash = 0.1;
   if (run.events.length < 240) run.events.push({ t: 'hit', x: clamp(e.x + e.w / 2, 4, W - 4), y: e.y + e.h / 2, b: crit });
   if (e.hp <= 0) kill(run, e);
@@ -600,9 +740,13 @@ function areaDamage(run: Run, x: number, y: number, r: number, dmg: number): voi
   for (const e of run.enemies) if (!e.dead && distToBox(x, y, e) <= r) damage(run, e, dmg);
 }
 
+/** Stamped on every new shot; set together with run.src. */
+let shotSrc = '';
+function credit(run: Run, src: string): void { run.src = src; shotSrc = src; }
+
 function newShot(kind: Shot['kind'], x: number, y: number, angle: number, speed: number, dmg: number): Shot {
   return {
-    kind, x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, dmg,
+    kind, src: shotSrc, x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, dmg,
     pierce: 0, bounces: 0, life: 1.4, hit: [], dead: false, sx: x, sy: y, tx: x, ty: y, t: 0, dur: 0, radius: 0,
   };
 }
@@ -732,6 +876,7 @@ function updatePins(run: Run, dt: number): void {
   const w = run.weapons.find(q => q.id === 'pin' || q.id === 'anchor');
   const st = w ? weaponStats(w.id, w.lvl) : null;
   const dm = run.stats.dmgMul;
+  if (w) credit(run, w.id);
   for (const pin of run.pins) {
     pin.life -= dt;
     for (const b of run.bullets) if (b.x > pin.x - 2 && b.x < pin.x + pin.w + 2 && b.y > pin.y - 2 && b.y < pin.y + pin.h + 2) b.life = 0;
@@ -762,6 +907,7 @@ function updateAllies(run: Run, dt: number): void {
     for (const e of run.enemies) {
       if (e.dead || a.hit.includes(e.id) || e.x >= a.x + a.w || e.x + e.w <= a.x || e.y >= a.y + a.h || e.y + e.h <= a.y) continue;
       a.hit.push(e.id);
+      credit(run, a.src);
       damage(run, e, a.dmg);
       if (--a.hits <= 0) {
         if (run.events.length < 240) run.events.push({ t: 'pop', x: clamp(a.x + a.w / 2, 4, W - 4), y: a.y + a.h / 2, s: '#7dffb0' });
@@ -793,6 +939,7 @@ function graze(run: Run, e: Enemy | null, x: number, y: number): void {
   if (run.events.length < 240) run.events.push({ t: 'graze', x: p.x, y: p.y });
   const dm = run.stats.dmgMul;
   for (const w of run.weapons) {
+    credit(run, w.id);
     if (w.id === 'graze') {
       const st = weaponStats(w.id, w.lvl);
       const used: number[] = [];
@@ -891,6 +1038,7 @@ function updateWeapons(run: Run, dt: number): void {
   for (const w of run.weapons) {
     const st = weaponStats(w.id, w.lvl);
     const dmg = st.dmg * dm;
+    credit(run, w.id);
     if (w.id === 'star' || w.id === 'chain') {
       orbit(run, st, dmg);
       if (w.id === 'chain' && (w.cd2 -= wdt) <= 0) w.cd2 = fireBounce(run, st.dmg2 * dm, st.bounces) ? st.cd2 * cm : 0.12;
@@ -921,6 +1069,7 @@ function updateWeapons(run: Run, dt: number): void {
 function updateShots(run: Run, dt: number): void {
   const p = run.player;
   for (const s of run.shots) {
+    credit(run, s.src);
     if (s.kind === 'coin') {
       s.t += dt;
       if (s.t >= s.dur) {
@@ -987,6 +1136,7 @@ export function useUlt(run: Run): boolean {
   run.ult.uses++;
   run.ult.need = Math.min(90, ULT_NEED + 12 * run.ult.uses);
   run.events.push({ t: 'ult', s: run.char.ultName });
+  credit(run, 'ult');
   switch (run.char.ult) {
     case 'haste':
       run.buff.haste = 6;
@@ -1342,3 +1492,18 @@ export function leaveShop(run: Run): boolean {
 }
 
 export { PASSIVE_BY_ID, RELIC_BY_ID, WEAPON_BY_ID };
+
+// ---------------------------------------------------------------- damage share
+
+export interface DmgShare { id: string; name: string; color: string; /** 0..1 of all damage dealt. */ pct: number }
+
+/** Who did the damage this run, biggest first. Weapons that were fused away keep their line. */
+export function damageShares(run: Run, max = 6): DmgShare[] {
+  const rows = Object.entries(run.dmgBy).filter(q => q[1] > 0).sort((a, b) => b[1] - a[1]);
+  const total = rows.reduce((a, q) => a + q[1], 0);
+  if (total <= 0) return [];
+  return rows.slice(0, max).map(([id, v]) => {
+    const d = WEAPON_BY_ID[id as WeaponId];
+    return { id, name: d ? d.name : run.char.ultName, color: d ? d.color : '#ffd24a', pct: v / total };
+  });
+}

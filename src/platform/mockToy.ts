@@ -5,6 +5,7 @@
  * the first navigate() call flips those on, as if the player went and did it. Calls are recorded
  * on window.__toyLog.
  */
+import { encodeScore } from '../game/scoring';
 import type { MyRank, Period, RankItem } from './toy';
 
 export function installMockToy(mode: string): void {
@@ -16,7 +17,7 @@ export function installMockToy(mode: string): void {
   const me = { following: fan, liked: fan, coins: fan ? 2 : 0, favorited: fan };
   const names = ['弹幕大师', '百万UP本人', '一键三连', '下次一定', '火钳刘明', '前排围观', '硬币富翁', '鸽子王', '课代表', '路过的萌新'];
   const board = (b: number): RankItem[] => {
-    const rows = names.map((nickname, i) => ({ nickname, score: b === 2 ? 150 - i * 13 : Math.round(9_000_000 / (i + 1) ** 1.6), avatar: '' }));
+    const rows = names.map((nickname, i) => ({ nickname, score: b === 4 ? 450 - i * 31 : encodeScore(Math.round(3_600_000_000 / (i + 1) ** 3)), avatar: '' }));
     if (scores[b] !== undefined) rows.push({ nickname: '我（模拟）', score: scores[b], avatar: '' });
     return rows.sort((a, c) => c.score - a.score).map((r, i) => ({ ...r, rank: i + 1 }));
   };

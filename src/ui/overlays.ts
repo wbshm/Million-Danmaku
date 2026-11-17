@@ -4,7 +4,7 @@ import { fmtMult, type Gfx } from '../engine/renderer';
 import { icons } from '../engine/sprites';
 import { BOSS_WAVES, H, W } from '../game/balance';
 import { RELICS, RELIC_BY_ID } from '../game/relics';
-import { currentMultiplier, relicCount, type Run } from '../game/run';
+import { currentMultiplier, damageShares, relicCount, type DmgShare, type Run } from '../game/run';
 import { FUSE_LEVEL, RECIPES, WEAPON_BY_ID, type WeaponId } from '../game/weapons';
 import { C, type Ui } from './widgets';
 
@@ -110,6 +110,25 @@ export function drawRecipes(gfx: Gfx, run: Run | null, x: number, y: number, w: 
   return y;
 }
 
+/** 输出占比 in two columns: colour chip, weapon, share of all damage. Returns the y below the block. */
+export function drawShares(gfx: Gfx, shares: readonly DmgShare[], x: number, y: number, w: number, cols = 2): number {
+  const cw = Math.floor((w - (cols - 1) * 8) / cols);
+  shares.forEach((s, i) => {
+    const cx = x + (i % cols) * (cw + 8), cy = y + Math.floor(i / cols) * 13;
+    // A bar behind the row, as long as the share.
+    gfx.alpha(0.22);
+    gfx.rect(cx, cy, Math.max(1, Math.round(cw * s.pct)), 12, s.color);
+    gfx.alpha(1);
+    gfx.rect(cx, cy, 2, 12, s.color);
+    let name = s.name;
+    const pct = s.pct >= 0.995 ? '100%' : s.pct < 0.01 ? '<1%' : `${Math.round(s.pct * 100)}%`;
+    while (name.length > 1 && gfx.textW(name) > cw - gfx.textW(pct) - 8) name = name.slice(0, -1);
+    gfx.text(name, cx + 5, cy, C.white, { shadow: null });
+    gfx.text(pct, cx + cw - 1, cy, C.yellow, { align: 'r', shadow: null });
+  });
+  return y + Math.ceil(shares.length / cols) * 13;
+}
+
 export interface PauseHandlers { resume: () => void; music: () => void; sfx: () => void; quit: () => void; musicOn: boolean; sfxOn: boolean }
 
 export function drawPause(gfx: Gfx, ui: Ui, run: Run, h: PauseHandlers): void {
@@ -130,5 +149,9 @@ export function drawPause(gfx: Gfx, ui: Ui, run: Run, h: PauseHandlers): void {
   y += 5;
   gfx.text(`合成配方（两把都到 Lv${run.tech.fuseLevel}）`, 16, y, C.pink);
   y = drawRecipes(gfx, run, 16, y + 16, W - 32) + 4;
-  gfx.text(`本局擦弹 ${run.grazes} 次`, 16, y, '#9fe8ff', { shadow: null });
+  const shares = damageShares(run, 6);
+  gfx.text('输出占比', 16, y, C.pink);
+  gfx.text(`擦弹 ${run.grazes} 次`, W - 16, y, '#9fe8ff', { align: 'r', shadow: null });
+  if (shares.length) drawShares(gfx, shares, 16, y + 15, W - 32);
+  else gfx.text('还没打出伤害', 16, y + 15, C.dim, { shadow: null });
 }

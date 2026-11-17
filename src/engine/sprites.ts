@@ -43,7 +43,10 @@ function upPalette(shirt: string, hair: string, phones: string): Record<string, 
 export interface CharSprites { a: HTMLCanvasElement; b: HTMLCanvasElement }
 
 export const charSprites: CharSprites[] = [];
-export const goldSprites: CharSprites = { a: null!, b: null! };
+/** 百万皮肤: the character's own colours with a gold outline and a crown (two extra rows on top). */
+export const millionSprites: CharSprites[] = [];
+export const CROWN_H = 2;
+const CROWN = ['.y..yy..y.', '.yyyyyyyy.'];
 
 const HEART = ['.kk.kk.', 'krrkrrk', 'krrrrrk', 'krrrrrk', '.krrrk.', '..krk..', '...k...'];
 const COIN = ['.kkkk.', 'kyyyyk', 'kyddyk', 'kyddyk', 'kyyyyk', '.kkkk.'];
@@ -59,13 +62,14 @@ export const icons = {
 
 export function buildSprites(): void {
   charSprites.length = 0;
+  millionSprites.length = 0;
   for (const ch of CHARS) {
     const pal = upPalette(ch.shirt, ch.hair, ch.phones);
     charSprites.push({ a: makeSprite(UP_A, pal), b: makeSprite(UP_B, pal) });
+    // Gold outline; a yellow shirt would melt into it, so its outline goes darker.
+    const mp = { ...pal, k: ch.shirt === '#ffd24a' ? '#8a5a00' : '#c98a1a', e: '#14141f', y: '#ffd24a' };
+    millionSprites.push({ a: makeSprite([...CROWN, ...UP_A], mp), b: makeSprite([...CROWN, ...UP_B], mp) });
   }
-  const gold = { k: '#5a3a00', h: '#ffe680', s: '#fff3c4', e: '#5a3a00', c: '#ffffff', p: '#ffd24a', w: '#ffffff', b: '#c98a1a' };
-  goldSprites.a = makeSprite(UP_A, gold);
-  goldSprites.b = makeSprite(UP_B, gold);
   icons.heart = makeSprite(HEART, { k: '#14141f', r: '#ff5a6e' });
   icons.heartEmpty = makeSprite(HEART, { k: '#14141f', r: '#3a3a4c' });
   icons.heartPickup = makeSprite(HEART, { k: '#ffffff', r: '#ff5a6e' });

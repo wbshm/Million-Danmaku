@@ -11,7 +11,7 @@
  * Outside B站 (local dev, file://) window.toy is missing or unusable: everything falls back to
  * localStorage / no-ops, and no call may ever throw into the game or hang it.
  */
-import { clampScore } from '../game/scoring';
+import { clampScore, decodeScore, encodeScore } from '../game/scoring';
 import { SAVE_KEY, decodeSave, defaultSave, encodeSave, mergeSaves, type Save } from '../game/save';
 
 export type Period = 'all' | 'month' | 'week' | 'day';
@@ -56,8 +56,13 @@ declare global {
   interface Window { toy?: ToySdk }
 }
 
-export const BOARD_FANS = 1;
-export const BOARD_SPEED = 2;
+/**
+ * Screens ask for tab 1 (fans) or 2 (speed). On the platform those are boards 3 and 4: boards 1 and 2
+ * hold the scores of the 10-wave version (raw fans, stuck at the 16,777,215 cap) and are left alone.
+ */
+export const BOARD_FANS = 3;
+export const BOARD_SPEED = 4;
+const boardId = (tab: number): number => (tab === 2 ? BOARD_SPEED : BOARD_FANS);
 const LOCAL_KEY = 'million-danmaku.save_v1';
 const RATE_LIMIT = 307044;
 
@@ -185,7 +190,7 @@ export const platform = {
   },
 
   /** Open a B站 page. Call directly from a tap handler; returns false if unsupported here. */
-  navigate(type: 'video' | 'space', id: string): boolean {
+  navigate(type: 'video' | 'space' | 'search', id: string): boolean {
     if (!this.canNavigate || !id || !window.toy) return false;
     try {
       void Promise.resolve(window.toy.navigate({ type, id, extra: { from: 'toy' } })).catch(() => {});
@@ -224,11 +229,11 @@ export const platform = {
     } catch { /* keep the local copy; next settlement tries again */ }
   },
 
-  /** Report one finished run. Board 1: fans. Board 2: seconds left when a million was reached. */
+  /** Report one finished run: fans (encoded, see encodeScore) and seconds left when a million was reached. */
   async submit(fans: number, millionAt: number | null): Promise<SubmitResult> {
     if (!(await can('submitScore'))) return 'offline';
     try {
-      await withBackoff(() => window.toy!.submitScore({ board: BOARD_FANS, score: clampScore(fans) }));
+      await withBackoff(() => window.toy!.submitScore({ board: BOARD_FANS, score: encodeScore(fans) }));
       if (millionAt !== null) await withBackoff(() => window.toy!.submitScore({ board: BOARD_SPEED, score: clampScore(millionAt) }));
       rankCache.clear();
       return 'ok';
@@ -238,7 +243,9 @@ export const platform = {
   },
 
   /** Cached per board+period; pass force=true only from an explicit "refresh" tap. */
-  async rank(board: number, period: Period, force = false): Promise<RankData | null> {
+  async rank(tab: number, period: Period, force = false): Promise<RankData | null> {
+    const board = boardId(tab);
+    const fans = (v: number): number => (board === BOARD_FANS ? decodeScore(v) : v);
     const key = `${board}:${period}`;
     if (!force && rankCache.has(key)) return rankCache.get(key)!;
     if (!(await can('getRankList'))) return null;
@@ -248,7 +255,8 @@ export const platform = {
       if (await can('getMyRank')) {
         try { mine = await withBackoff(() => window.toy!.getMyRank({ board, period })); } catch { /* guest */ }
       }
-      const data: RankData = { list: Array.isArray(list) ? list : [], mine };
+      if (mine) mine = { ...mine, score: fans(mine.score) };
+      const data: RankData = { list: Array.isArray(list) ? list.map(r => ({ ...r, score: fans(r.score) })) : [], mine };
       rankCache.set(key, data);
       return data;
     } catch {
@@ -261,7 +269,7 @@ export const platform = {
    * (data URL) for the caller to display. Must be called from a user gesture.
    */
   async share(score: number): Promise<{ qr: string } | null> {
-    const path = `index.html?s=${clampScore(score)}`;
+    const path = `index.html?s=${Math.min(9e15, Math.max(0, Math.floor(score)))}`;
     try {
       if (this.shareMode === 'share') { await timeout(window.toy!.share({ path }), 8000); return null; }
       if (this.shareMode === 'qr') {

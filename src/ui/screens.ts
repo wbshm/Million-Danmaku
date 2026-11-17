@@ -1,10 +1,12 @@
 /** Out-of-run screens: title, result, leaderboard. */
 import { wrapText } from '../engine/pixelText';
 import { fmtInt, fmtMult, fmtShort, type Gfx } from '../engine/renderer';
-import { charSprites, goldSprites } from '../engine/sprites';
+import { charSprites, millionSprites } from '../engine/sprites';
 import { SCROLL_TEXT } from '../data/danmaku';
 import { H, LANE_H, MILLION, TOTAL_TIME, W, WAVES } from '../game/balance';
 import { CHARS } from '../game/chars';
+import type { DmgShare } from '../game/run';
+import { drawShares } from './overlays';
 import { PERK_ROWS, PERK_TRIPLE_MULT, isTriple, perkCount, type Perks } from '../game/perks';
 import type { MyRank, Period, RankItem, ShareMode, SubmitResult } from '../platform/toy';
 import { C, type Ui } from './widgets';
@@ -53,6 +55,10 @@ export interface TitleState {
   perks: Perks;
   canTriple: boolean;
   canRefresh: boolean;
+  /** The player already follows the author. */
+  followed: boolean;
+  /** Label of the always-visible jump button ('' = nowhere to jump from here). */
+  social: string;
   /** Spendable 灵感, and whether it can buy anything right now. */
   insight: number;
   techReady: boolean;
@@ -75,10 +81,11 @@ export function drawTitle(gfx: Gfx, ui: Ui, s: TitleState): void {
   const open = s.unlocked[s.charIdx];
   const px = 14, py = 92, pw = W - 28, ph = 134;
   gfx.panel(px, py, pw, ph, C.panel, ch.follow && !open ? C.blue : C.line);
-  const set = s.best >= MILLION ? goldSprites : charSprites[s.charIdx];
+  const set = (s.best >= MILLION ? millionSprites : charSprites)[s.charIdx];
   const img = Math.floor(s.time * 4) % 2 ? set.b : set.a;
   if (!open) gfx.alpha(0.25);
-  gfx.g.drawImage(img, px + 12, py + 9, 40, 48);
+  // The 百万 skin is taller (crown), so anchor on the feet.
+  gfx.g.drawImage(img, px + 12, py + 57 - img.height * 4, 40, img.height * 4);
   gfx.alpha(1);
   gfx.text(ch.name, px + 62, py + 6, open ? C.white : C.dim);
   if (ch.follow) gfx.text('关注专属', px + pw - 8, py + 6, C.blue, { align: 'r' });
@@ -109,7 +116,16 @@ export function drawTitle(gfx: Gfx, ui: Ui, s: TitleState): void {
   if (s.techReady && Math.floor(s.time * 3) % 2 === 0) { gfx.rect(132, 277, 6, 6, C.ink); gfx.rect(133, 278, 4, 4, C.red); }
 
   if (!s.perkPanel) {
-    gfx.text('拖动移动 · 自动攻击 · 攒满放大招', W / 2, H - 99, C.dim, { align: 'c' });
+    if (s.social) {
+      // Follow link: always on the title, not only on the follow-locked characters.
+      const who = s.author ? [...s.author].slice(0, 7).join('') : 'UP 主';
+      gfx.panel(14, 308, W - 28, 32, C.panel, s.followed ? C.line : C.blue);
+      gfx.text(s.followed ? `已关注 ${who}` : `关注 ${who}`, 22, 311, s.followed ? C.green : C.white);
+      gfx.text(s.followed ? '谢谢支持！' : '解锁 2 个专属角色', 22, 325, C.dim, { shadow: null });
+      ui.button(W - 14 - 66, 314, 60, 20, s.social, s.onFollow, { color: s.followed ? C.panel2 : C.blue, ink: s.followed ? C.white : C.ink });
+    } else {
+      gfx.text('拖动移动 · 自动攻击 · 攒满放大招', W / 2, H - 99, C.dim, { align: 'c' });
+    }
     gfx.text('贴着弹幕掠过＝擦弹，也能充能', W / 2, H - 84, C.dim, { align: 'c' });
     gfx.text('两把武器都到 Lv4 可以合成', W / 2, H - 69, C.dim, { align: 'c' });
     gfx.text('击败弹幕涨粉，买遗物叠倍率', W / 2, H - 54, C.dim, { align: 'c' });
@@ -155,6 +171,8 @@ export interface ResultState {
   insLeft: number;
   techReady: boolean;
   grazes: number;
+  /** 输出占比 of the run, biggest first. */
+  dmg: readonly DmgShare[];
   onTech: () => void;
   shareMode: ShareMode;
   hasRank: boolean;
@@ -164,6 +182,9 @@ export interface ResultState {
   onRank: () => void;
   onShare: () => void;
   onTitle: () => void;
+  /** Label of the follow / 三连 jump button ('' = hidden). */
+  social: string;
+  onSocial: () => void;
 }
 
 export function drawResult(gfx: Gfx, ui: Ui, s: ResultState): void {
@@ -178,28 +199,39 @@ export function drawResult(gfx: Gfx, ui: Ui, s: ResultState): void {
   } else gfx.text(`最高 ${fmtInt(s.best)}`, W / 2, 112, C.dim, { align: 'c' });
 
   const rows: [string, string][] = [
-    ['到达波次', `${s.wave}/${WAVES}${s.win ? ' 通关' : ''}`],
-    ['击败弹幕', fmtInt(s.kills)],
-    ['最高连击', String(s.maxCombo)],
+    [s.win ? '通关' : '波次', `${s.wave}/${WAVES}`],
+    ['击败', fmtInt(s.kills)],
+    ['连击', String(s.maxCombo)],
     ['擦弹', `${s.grazes} 次`],
-    ['最终倍率', fmtMult(s.mult)],
+    ['倍率', fmtMult(s.mult)],
     ['等级', `Lv${s.level}`],
   ];
-  if (million) rows.push(['百万用时', `${Math.round(TOTAL_TIME - (s.millionAt ?? 0))} 秒`]);
-  gfx.panel(22, 132, W - 44, rows.length * 15 + 10, C.panel, C.line);
+  if (million) rows.push(['百万', `用时 ${Math.round(TOTAL_TIME - (s.millionAt ?? 0))} 秒`]);
+  // Two columns of figures, then who did the damage.
+  const px = 14, pw = W - 28, cw = (pw - 20) / 2;
+  const lines = Math.ceil(rows.length / 2);
+  const dmgH = s.dmg.length ? 17 + Math.ceil(s.dmg.length / 2) * 13 : 0;
+  gfx.panel(px, 130, pw, lines * 14 + 8 + dmgH, C.panel, C.line);
   rows.forEach(([k, v], i) => {
-    gfx.text(k, 30, 137 + i * 15, C.dim, { shadow: null });
-    gfx.text(v, W - 30, 137 + i * 15, C.white, { align: 'r', shadow: null });
+    const x = px + 6 + (i % 2) * (cw + 8), ry = 134 + Math.floor(i / 2) * 14;
+    gfx.text(k, x, ry, C.dim, { shadow: null });
+    gfx.text(v, x + cw, ry, C.white, { align: 'r', shadow: null });
   });
-  let y = 132 + rows.length * 15 + 14;
+  let y = 134 + lines * 14 + 2;
+  if (s.dmg.length) {
+    gfx.rect(px + 6, y, pw - 12, 1, C.line);
+    gfx.text('输出占比', px + 6, y + 3, C.pink, { shadow: null });
+    y = drawShares(gfx, s.dmg, px + 6, y + 16, pw - 12);
+  }
+  y += 8;
   gfx.text(`灵感 +${s.ins}`, W / 2 - 4, y, C.yellow, { align: 'r' });
   gfx.text(`（现有 ${s.insLeft}）`, W / 2 - 2, y, C.dim, { shadow: null });
   y += 15;
-  for (const name of s.unlocked) { gfx.text(`解锁：${name}`, W / 2, y, C.green, { align: 'c' }); y += 14; }
-  const note = s.submit === 'pending' ? '正在提交成绩…' : s.submit === 'ok' ? '成绩已提交到排行榜' : s.submit === 'fail' ? '成绩提交失败（未登录或网络问题）' : '当前环境没有排行榜，成绩只存在本机';
-  wrapText(note, W - 30).forEach(line => { gfx.text(line, W / 2, y, C.dim, { align: 'c', shadow: null }); y += 13; });
-
   const by = H - 100;
+  for (const name of s.unlocked) { if (y > by - 28) break; gfx.text(`解锁：${name}`, W / 2, y, C.green, { align: 'c' }); y += 14; }
+  const note = s.submit === 'pending' ? '正在提交成绩…' : s.submit === 'ok' ? '成绩已提交到排行榜' : s.submit === 'fail' ? '成绩提交失败（未登录或网络问题）' : '当前环境没有排行榜，成绩只存在本机';
+  wrapText(note, W - 30).forEach(line => { if (y <= by - 14) gfx.text(line, W / 2, y, C.dim, { align: 'c', shadow: null }); y += 13; });
+
   ui.button(14, by, 92, 30, '再来一局', s.onAgain, { key: 'Enter' });
   ui.button(110, by, 92, 30, '科技树', s.onTech, { color: C.yellow, key: 'KeyT' });
   if (s.techReady && Math.floor(s.time * 3) % 2 === 0) { gfx.rect(196, by - 2, 6, 6, C.ink); gfx.rect(197, by - 1, 4, 4, C.red); }
@@ -207,7 +239,8 @@ export function drawResult(gfx: Gfx, ui: Ui, s: ResultState): void {
   const bw = share ? 92 : W - 28;
   ui.button(14, by + 36, bw, 24, '排行榜', s.onRank, { color: C.blue, disabled: !s.hasRank });
   if (share) ui.button(110, by + 36, 92, 24, s.shareMode === 'share' ? '分享' : '二维码', s.onShare, { color: C.green });
-  ui.button(14, by + 66, W - 28, 22, '返回标题', s.onTitle, { color: C.panel2, ink: C.white, key: 'Escape' });
+  ui.button(14, by + 66, s.social ? 92 : W - 28, 22, '返回标题', s.onTitle, { color: C.panel2, ink: C.white, key: 'Escape' });
+  if (s.social) ui.button(110, by + 66, 92, 22, s.social, s.onSocial, { color: C.pink });
 }
 
 export interface RankState {

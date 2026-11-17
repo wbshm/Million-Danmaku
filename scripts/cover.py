@@ -107,7 +107,7 @@ text('擦弹', 138, 177, '#9fe8ff')
 # Footer.
 rect(0, LH - 19, LW, 19, '#0b0b12')
 rect(0, LH - 19, LW, 1, '#3d3d5c')
-text('像素肉鸽 · 武器合成 · 科技树 · 五分钟一局', LW // 2, LH - 17, DIM, shadow=None, anchor='c')
+text('像素肉鸽 · 武器合成 · 科技树 · 20 波 4 个 Boss', LW // 2, LH - 17, DIM, shadow=None, anchor='c')
 rect(0, LH - 2, LW * 2 // 3, 2, PINK)
 rect(LW * 2 // 3 - 1, LH - 4, 3, 4, WHITE)
 

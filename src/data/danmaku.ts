@@ -15,4 +15,4 @@ export const BIG_TEXT: readonly string[] = ['取关了', '就这也能火', '三
 
 export const SPAM_TEXT: readonly string[] = ['刷屏啦', '666666', '哈哈哈哈哈', '保护保护'];
 
-export const BOSS_NAME: Record<1 | 2, string> = { 1: '高能预警', 2: '弹幕护体' };
+export const BOSS_NAME: Record<1 | 2 | 3 | 4, string> = { 1: '高能预警', 2: '弹幕护体', 3: '直播事故', 4: '百万黑粉' };

@@ -137,6 +137,6 @@ export const mergeTech = (a: readonly number[], b: readonly number[]): number[] 
 export function runInsight(r: { wave: number; win: boolean; fans: number; bossKills: number }): number {
   const cleared = r.win ? WAVES : Math.max(0, r.wave - 1);
   const f = r.fans;
-  const tier = f >= 5e6 ? 12 : f >= 1e6 ? 9 : f >= 3e5 ? 6 : f >= 1e5 ? 4 : f >= 1e4 ? 2 : f >= 1e3 ? 1 : 0;
+  const tier = f >= 1e9 ? 24 : f >= 1e8 ? 20 : f >= 2e7 ? 16 : f >= 5e6 ? 12 : f >= 1e6 ? 9 : f >= 3e5 ? 6 : f >= 1e5 ? 4 : f >= 1e4 ? 2 : f >= 1e3 ? 1 : 0;
   return 2 + cleared + tier + 2 * r.bossKills;
 }

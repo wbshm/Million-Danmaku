@@ -41,3 +41,20 @@ export function clampScore(n: number): number {
   if (!Number.isFinite(n)) return n > 0 ? SCORE_CAP : 0;
   return Math.max(0, Math.min(SCORE_CAP, Math.floor(n)));
 }
+
+/**
+ * Fans can outgrow the leaderboard's integer range, so the board stores them as six significant
+ * digits plus a power of ten: exponent × 1,000,000 + mantissa. Below a million the code is the
+ * number itself, and a bigger number always gets a bigger code, so the board still sorts correctly.
+ */
+export function encodeScore(n: number): number {
+  if (!Number.isFinite(n)) return n > 0 ? SCORE_CAP : 0;
+  let m = Math.max(0, Math.floor(n)), exp = 0;
+  while (m >= 1e6) { m = Math.floor(m / 10); exp++; }
+  return Math.min(SCORE_CAP, exp * 1e6 + m);
+}
+
+export function decodeScore(code: number): number {
+  const c = Math.max(0, Math.floor(code));
+  return (c % 1e6) * Math.pow(10, Math.floor(c / 1e6));
+}

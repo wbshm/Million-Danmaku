@@ -21,7 +21,15 @@ export function botMove(run: Run): [number, number] {
     // Look a little ahead of where the danmaku is now.
     const lead = run.buff.freeze > 0 ? 0 : e.vx * 0.35;
     const box = { x: e.x + lead, y: e.y, w: e.w, h: e.h };
+    // A boss about to drop: the whole column down to where it lands is the danger.
+    const slam = e.kind === 'boss' && (e.mode === 1 || e.mode === 2);
+    if (slam) { box.x -= 4; box.w += 8; box.h = e.ty + e.h - e.y; }
     const d = distToBox(p.x, p.y, box);
+    if (slam && d < 26) {
+      // Sidestep out of the column by the nearer edge.
+      fx += (p.x < box.x + box.w / 2 ? -1 : 1) * 6;
+      continue;
+    }
     if (d > 30) continue;
     const cx = Math.max(box.x, Math.min(p.x, box.x + box.w));
     const cy = Math.max(box.y, Math.min(p.y, box.y + box.h));

@@ -3,13 +3,13 @@ import { config } from './config';
 import { Sound } from './engine/audio';
 import { Input } from './engine/input';
 import { resetGlyphs } from './engine/pixelText';
-import { Gfx } from './engine/renderer';
+import { Gfx, fmtInt } from './engine/renderer';
 import { buildSprites } from './engine/sprites';
-import { BOSS_WAVES, MILLION, W, H } from './game/balance';
+import { BOSS_WAVES, MILLION, W, H, WAVES } from './game/balance';
 import { botMove } from './game/bot';
 import { CHARS, unlockedChars } from './game/chars';
-import { NO_PERKS, perksFromBits, perksToBits, type Perks } from './game/perks';
-import { buyRelic, chooseUpgrade, createRun, currentMultiplier, leaveShop, rerollChoices, rerollShop, stepRun, useUlt, type GameEvent, type Run } from './game/run';
+import { NO_PERKS, isTriple, perksFromBits, perksToBits, type Perks } from './game/perks';
+import { buyRelic, chooseUpgrade, createRun, currentMultiplier, damageShares, leaveShop, rerollChoices, rerollShop, stepRun, useUlt, type DmgShare, type GameEvent, type Run } from './game/run';
 import { defaultSave, type Save } from './game/save';
 import { anyTechAffordable, buyTech, decodeTech, encodeTech, mergeTech, runInsight, techFx, techLeft } from './game/tech';
 import { platform, type MyRank, type Period, type RankItem, type SubmitResult } from './platform/toy';
@@ -38,6 +38,7 @@ interface Result {
   /** 灵感 earned by this run. */
   ins: number;
   grazes: number;
+  dmg: DmgShare[];
 }
 
 const STEP = 1 / 60;
@@ -63,6 +64,8 @@ const app = {
   paused: false,
   /** Seconds left of the death / clear moment before the result screen appears. */
   endTimer: 0,
+  /** Final boss went down: the clear sequence that plays before the result screen. */
+  finale: null as { t: number; x: number; y: number; name: string; next: number; blown: boolean } | null,
   result: null as Result | null,
   rankFrom: 'title' as Scene,
   techFrom: 'title' as Scene,
@@ -122,8 +125,11 @@ function syncSocial(): void {
 
 /** Send the player to the author's video (or space) and re-check once they are back. */
 function goAuthor(): void {
+  const mid = config.authorMid || platform.author.mid;
+  // Video first (三连 + follow in one place), then the author's space, then a search for their name.
   const ok = config.videoBvid ? platform.navigate('video', config.videoBvid)
-    : platform.navigate('space', config.authorMid || platform.author.mid);
+    : mid ? platform.navigate('space', mid)
+    : platform.navigate('search', platform.author.nickname);
   if (!ok) { sound.play('deny'); return; }
   sound.play('ui');
   app.socialDirty = true;
@@ -131,7 +137,14 @@ function goAuthor(): void {
   window.setTimeout(() => { if (app.socialDirty && !document.hidden) syncSocial(); }, 2500);
 }
 
-const followTarget = (): boolean => platform.canNavigate && !!(config.videoBvid || config.authorMid || platform.author.mid);
+const followTarget = (): boolean => platform.canNavigate && !!(config.videoBvid || config.authorMid || platform.author.mid || platform.author.nickname);
+
+/** Label of the jump button, or '' when there is nowhere to send the player. */
+function socialLabel(): string {
+  if (!followTarget()) return '';
+  if (config.videoBvid) return isTriple(perks()) && following() ? '看看视频' : following() ? '去三连' : '关注+三连';
+  return following() ? 'UP主主页' : '关注UP主';
+}
 
 // ------------------------------------------------------------------ flow
 
@@ -184,6 +197,7 @@ function startRun(): void {
   app.run = createRun(seed, app.save.char, perks(), techFx(techLevels()));
   app.paused = false;
   app.endTimer = 0;
+  app.finale = null;
   app.acc = 0;
   app.result = null;
   fx.reset();
@@ -214,13 +228,13 @@ function finishRun(): void {
   if (run.millionAt !== null) save.bestFast = Math.max(save.bestFast, run.millionAt);
   const after = unlocked();
   const names = CHARS.filter((_, i) => after[i] && !before[i]).map(c => c.name);
-  if (!hadGold && save.best >= MILLION) names.push('百万金身皮肤');
+  if (!hadGold && save.best >= MILLION) names.push('百万皇冠皮肤（每个角色各一套）');
   const ins = runInsight(run);
   save.ins += ins;
   run.combo = 0;
   const result: Result = {
     fans, win: run.win, millionAt: run.millionAt, newBest, wave: run.wave, kills: run.kills,
-    maxCombo: run.maxCombo, mult: currentMultiplier(run), level: run.level, unlocked: names, submit: 'pending', ins, grazes: run.grazes,
+    maxCombo: run.maxCombo, mult: currentMultiplier(run), level: run.level, unlocked: names, submit: 'pending', ins, grazes: run.grazes, dmg: damageShares(run, 6),
   };
   app.result = result;
   app.scene = 'result';
@@ -291,7 +305,60 @@ function toggleFullscreen(): void {
 
 // ------------------------------------------------------------------ events
 
+function finaleCheer(): number {
+  const f = app.finale;
+  return f && f.blown ? 1 + Math.abs(Math.sin((f.t - FINALE_BLOW) * 8)) * 5 : 0;
+}
+
+/** The dying boss: its text keeps shaking and flickering where it fell until it blows up. */
+function drawFinaleBoss(f: NonNullable<typeof app.finale>): void {
+  if (f.blown) return;
+  const k = f.t / FINALE_BLOW;
+  const dx = Math.round((Math.random() * 2 - 1) * (2 + 4 * k)), dy = Math.round((Math.random() * 2 - 1) * (1 + 3 * k));
+  const w = gfx.textW(f.name, 2);
+  const x = Math.max(2, Math.min(W - w - 2, f.x - w / 2));
+  gfx.text(f.name, x + dx, f.y - 12 + dy, Math.floor(f.t * 20) % 2 ? C.white : C.red, { scale: 2 });
+}
+
+const FINALE_BLOW = 1.3, FINALE_LEN = 4.4;
+const PARTY = [C.yellow, C.pink, C.blue, C.green, C.white];
+
+/** The final boss breaks apart, blows up, then confetti while the fans count up. */
+function updateFinale(dt: number): void {
+  const f = app.finale, run = app.run;
+  if (!f || !run) return;
+  f.t += dt;
+  if (f.t < FINALE_BLOW) {
+    if (f.t >= f.next) {
+      f.next = f.t + 0.11;
+      const x = f.x + (Math.random() * 2 - 1) * 46, y = f.y + (Math.random() * 2 - 1) * 14;
+      fx.burst(x, y, PARTY[Math.floor(Math.random() * PARTY.length)], 8, 70);
+      fx.ring(x, y, 12 + Math.random() * 14, C.white, 0.2);
+      fx.shake = Math.max(fx.shake, 3);
+      sound.play('boom');
+    }
+    return;
+  }
+  if (!f.blown) {
+    f.blown = true;
+    for (const [r, c, life] of [[260, C.yellow, 0.6], [180, C.white, 0.5], [110, C.pink, 0.4]] as const) fx.ring(f.x, f.y, r, c, life);
+    for (const c of PARTY) fx.burst(f.x, f.y, c, 22, 150);
+    fx.flash = 0.6;
+    fx.flashColor = C.white;
+    fx.shake = 11;
+    fx.say('完播！', C.yellow, FINALE_LEN - FINALE_BLOW, ' ');
+    fx.toast(`最终 Boss「${f.name}」击破`, C.pink, FINALE_LEN - FINALE_BLOW);
+    sound.play('blast');
+    sound.play('win');
+  }
+  if (f.t >= f.next) { f.next = f.t + 0.06; fx.confetti(3, PARTY); }
+  // The fans tally rolls up under the banner.
+  const k = Math.min(1, (f.t - FINALE_BLOW) / 1.4);
+  if (fx.banner) fx.banner.sub = `本场涨粉 ${fmtInt(Math.floor(run.fans * (1 - Math.pow(1 - k, 3))))}`;
+}
+
 function handleEvents(events: GameEvent[]): void {
+  let bossDown: GameEvent | null = null;
   for (const e of events) {
     const x = e.x ?? 0, y = e.y ?? 0;
     switch (e.t) {
@@ -343,7 +410,25 @@ function handleEvents(events: GameEvent[]): void {
         fx.burst(W / 2, H * 0.3, C.yellow, 60, 140);
         sound.play('million');
         break;
+      case 'slamWarn': sound.play('warn'); break;
+      case 'slam': fx.shake = Math.max(fx.shake, 7); fx.ring(x, y, 60, C.red, 0.3); fx.burst(x, y, C.red, 14, 90); sound.play('blast'); break;
+      case 'bossDown':
+        bossDown = e;
+        fx.flash = 0.35;
+        fx.flashColor = C.white;
+        fx.shake = 9;
+        fx.ring(x, y, 90, C.white, 0.4);
+        fx.ring(x, y, 50, C.pink, 0.3);
+        fx.burst(x, y, C.pink, 30, 120);
+        sound.play('bossdown');
+        if ((app.run?.wave ?? 0) < WAVES) fx.toast(`Boss「${e.s ?? ''}」击破`, C.pink, 1.6, true);
+        break;
       case 'over':
+        if (e.b && bossDown) {
+          app.finale = { t: 0, x: bossDown.x ?? W / 2, y: bossDown.y ?? 80, name: bossDown.s ?? '', next: 0, blown: false };
+          app.endTimer = FINALE_LEN;
+          break;
+        }
         app.endTimer = 1.5;
         if (e.b) { fx.say('完播！', C.green, 1.5); sound.play('win'); } else { fx.say('直播翻车', C.red, 1.5); sound.play('over'); }
         break;
@@ -367,9 +452,11 @@ function update(dt: number): void {
         app.acc -= STEP;
       }
     }
-    fx.update(dt);
+    // The final blow lands in slow motion.
+    fx.update(app.finale && app.finale.t < 0.45 ? dt * 0.3 : dt);
   }
   handleEvents(run.events);
+  if (!app.paused) updateFinale(dt);
   if (app.endTimer > 0 && (app.endTimer -= dt) <= 0) finishRun();
 }
 
@@ -393,6 +480,7 @@ function render(dt: number): void {
         onStart: () => { sound.play('choose'); startRun(); },
         onRank: openRank,
         onMusic: toggleMusic,
+        followed: following(), social: socialLabel(),
         onFollow: goAuthor,
         onTriple: goAuthor,
         onRefresh: () => { sound.play('ui'); syncSocial(); },
@@ -401,10 +489,15 @@ function render(dt: number): void {
     case 'game':
       if (!run) break;
       drawGame(gfx, ui, run, fx, input, {
-        time: app.time, gold: app.save.best >= MILLION, hint: !app.save.seenHint, desktop: input.desktop, onPause: togglePause,
+        time: app.time, gold: app.save.best >= MILLION, cheer: finaleCheer(), hint: !app.save.seenHint, desktop: input.desktop, onPause: togglePause,
         onUlt: () => { if (run.phase === 'play' && !app.paused && !useUlt(run)) sound.play('deny'); },
       });
-      if (app.endTimer > 0) break;
+      if (app.finale) drawFinaleBoss(app.finale);
+      if (app.endTimer > 0) {
+        // Once the boss has blown up a tap goes straight to the result.
+        if (app.finale && app.finale.t > FINALE_BLOW + 0.9) ui.zone(0, 0, W, H, () => { app.endTimer = 0.01; });
+        break;
+      }
       if (run.phase === 'levelup') {
         drawLevelUp(gfx, ui, run, i => { chooseUpgrade(run, i); ui.lock(run.phase === 'play' ? 0 : 300); }, input.desktop, app.time,
           () => { if (rerollChoices(run)) ui.lock(300); });
@@ -432,7 +525,7 @@ function render(dt: number): void {
         ...r, best: app.save.best, shareMode: platform.shareMode, hasRank: platform.hasRank, dt, time: app.time,
         insLeft: insightLeft(), techReady: techReady(), onTech: openTech,
         onAgain: () => { sound.play('choose'); startRun(); },
-        onRank: openRank, onShare: share, onTitle: toTitle,
+        onRank: openRank, onShare: share, onTitle: toTitle, social: socialLabel(), onSocial: goAuthor,
       });
       break;
     }
@@ -454,6 +547,13 @@ function render(dt: number): void {
         onBack: () => { app.scene = app.rankFrom === 'result' && app.result ? 'result' : 'title'; ui.lock(250); },
       });
       break;
+  }
+  // Keyboard players: say so when the keys are going somewhere else (the page around the game has focus).
+  if (input.desktop && app.scene !== 'loading' && !input.focused) {
+    gfx.alpha(0.85);
+    gfx.rect(0, 0, W, 16, C.black);
+    gfx.alpha(1);
+    gfx.text('点一下游戏画面，键盘才能操作', W / 2, 2, Math.floor(app.time * 3) % 2 ? C.yellow : C.white, { align: 'c', shadow: null });
   }
   // PC layout: panels beside the play column (drawn last so they cover anything that spilled).
   if (app.scene !== 'loading') drawSides(gfx, ui, { run: app.scene === 'game' ? run : null, rank: app.sideRank });
@@ -493,6 +593,10 @@ document.addEventListener('visibilitychange', () => {
     sound.resume();
     if (app.socialDirty) syncSocial();
   }
+});
+// Keyboard focus left the game (a click on the page around it): hold the run rather than let it play on unattended.
+window.addEventListener('blur', () => {
+  if (input.desktop && app.scene === 'game' && app.run?.phase === 'play' && app.endTimer <= 0) app.paused = true;
 });
 // On PC the video opens in another tab, so coming back is a focus change rather than a visibility one.
 window.addEventListener('focus', () => { if (app.socialDirty) syncSocial(); });
@@ -539,6 +643,7 @@ async function boot(): Promise<void> {
   });
   gfx.resize();
   app.scene = 'title';
+  input.takeFocus();
 }
 
 void boot();

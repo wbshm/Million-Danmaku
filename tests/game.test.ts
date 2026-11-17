@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { Rng } from '../src/engine/rng';
-import { BOSS_WAVES, LANES, MILLION, SCORE_CAP, TOTAL_TIME, WAVES, textWidth, waveCfg, waveDuration } from '../src/game/balance';
+import { BOSS_WAVES, H, LANES, MILLION, SCORE_CAP, TOTAL_TIME, W, WAVES, textWidth, waveCfg, waveDuration } from '../src/game/balance';
 import { playBot } from '../src/game/bot';
 import { CHARS, unlockedChars } from '../src/game/chars';
 import { NO_PERKS, isTriple, perkCount, perksFromBits, perksToBits, type Perks } from '../src/game/perks';
 import { RELICS, relicPrice, RELIC_BY_ID } from '../src/game/relics';
-import { PIN_VULN, buyRelic, chooseUpgrade, createRun, currentMultiplier, dronePos, leaveShop, readyFusions, recalc, rerollChoices, rerollShop, rollChoices, scoreCtx, stepRun, ultReady, useUlt, type Enemy, type Run } from '../src/game/run';
+import { PIN_VULN, buyRelic, chooseUpgrade, createRun, currentMultiplier, damageShares, dronePos, leaveShop, readyFusions, recalc, rerollChoices, rerollShop, rollChoices, scoreCtx, stepRun, ultReady, useUlt, type Enemy, type Run } from '../src/game/run';
 import { TECHS, TIERS, buyTech, canBuyTech, decodeTech, encodeTech, maxTech, mergeTech, noTech, runInsight, techCost, techFx, techLeft, techOpen, techSpent } from '../src/game/tech';
-import { clampScore, comboMult, fanGain, multiplier, type ScoreCtx } from '../src/game/scoring';
+import { clampScore, comboMult, decodeScore, encodeScore, fanGain, multiplier, type ScoreCtx } from '../src/game/scoring';
 import { FUSE_LEVEL, RECIPES, WEAPONS, WEAPON_BY_ID, maxLevel, partnerOf, recipeHint, weaponStats, type WeaponId } from '../src/game/weapons';
 
 const ctx = (o: Partial<ScoreCtx> = {}): ScoreCtx => ({ addBase: 0, addMult: 0, mulMult: 1, combo: 0, comboCap: 1, eliteBonus: 0, eliteMul: 1, ...o });
@@ -16,7 +16,7 @@ const ctx = (o: Partial<ScoreCtx> = {}): ScoreCtx => ({ addBase: 0, addMult: 0, 
 function dummy(run: Run, x: number, y: number, hp = 1e9): Enemy {
   const e: Enemy = {
     id: run.nextId++, kind: 'scroll', text: '草', x, y, w: 12, h: 12, scale: 1, vx: 0, hp, maxHp: hp, base: 1, tier: 0, xp: 0, coins: 0,
-    color: '#ffffff', t: 5, life: 0, shootCd: 0, flash: 0, starCd: 0, grazeCd: 0, mark: 0, held: 0, slow: 0, slowK: 1, dead: false, boss: 0, atk: 0, angle: 0,
+    color: '#ffffff', t: 5, life: 0, shootCd: 0, flash: 0, starCd: 0, grazeCd: 0, mark: 0, held: 0, slow: 0, slowK: 1, dead: false, boss: 0, atk: 0, angle: 0, mode: 0, modeT: 0, ty: 0, homeY: y, vy: 0, n: 0,
   };
   run.enemies.push(e);
   return e;
@@ -101,13 +101,30 @@ describe('waves', () => {
       expect(b.base).toBeGreaterThanOrEqual(a.base);
     }
   });
-  it('has bosses on waves 5 and 10 and a five-minute-ish run', () => {
-    expect(BOSS_WAVES).toEqual([5, 10]);
-    expect(waveCfg(5).boss).toBe(1);
-    expect(waveCfg(10).boss).toBe(2);
+  it('has a different boss every fifth wave of twenty', () => {
+    expect(WAVES).toBe(20);
+    expect(BOSS_WAVES).toEqual([5, 10, 15, 20]);
+    expect(BOSS_WAVES.map(w => waveCfg(w).boss)).toEqual([1, 2, 3, 4]);
     expect(waveCfg(4).boss).toBe(0);
-    expect(TOTAL_TIME).toBe(8 * 30 + 2 * 40);
+    expect(TOTAL_TIME).toBe(16 * 30 + 4 * 40);
+    // The second half keeps getting harder, but far more gently than the first.
+    expect(waveCfg(20).hp / waveCfg(10).hp).toBeLessThan(waveCfg(10).hp / waveCfg(1).hp);
     expect(waveDuration(5)).toBe(40);
+  });
+  it('codes any score into the leaderboard range without changing the order', () => {
+    for (const n of [0, 1, 9999, 999_999]) expect(encodeScore(n)).toBe(n);
+    const xs = [0, 5, 999_999, 1_000_000, 1_000_009, 1_000_010, 16_777_215, 18_000_000, 123_456_789, 9.9e9, 7.62e10, 1e15];
+    for (let i = 1; i < xs.length; i++) expect(encodeScore(xs[i])).toBeGreaterThanOrEqual(encodeScore(xs[i - 1]));
+    expect(encodeScore(18_000_000)).toBeGreaterThan(encodeScore(16_777_215));
+    for (const n of xs) {
+      expect(encodeScore(n)).toBeLessThanOrEqual(SCORE_CAP);
+      expect(Number.isInteger(encodeScore(n))).toBe(true);
+      // Six significant digits survive the round trip.
+      expect(Math.abs(decodeScore(encodeScore(n)) - n)).toBeLessThanOrEqual(n * 1e-5);
+    }
+    expect(decodeScore(encodeScore(18_345_678))).toBe(18_345_600);
+    expect(encodeScore(Infinity)).toBe(SCORE_CAP);
+    expect(encodeScore(NaN)).toBe(0);
   });
   it('measures text the way the font does', () => {
     expect(textWidth('草')).toBe(12);
@@ -397,6 +414,86 @@ describe('trick weapons', () => {
     expect(e.dead).toBe(true);
     expect(run.allies).toHaveLength(0);
   });
+  it('killing the last boss announces it before the run is over, so the view can stage the ending', () => {
+    const run = lab([['like', 1]]);
+    run.wave = WAVES;
+    const e = dummy(run, run.player.x + 12, run.player.y - 6, 1);
+    e.kind = 'boss';
+    e.boss = 1;
+    e.atk = 99;
+    tick(run, 0.5);
+    const names = run.events.map(ev => ev.t);
+    expect(run.phase).toBe('over');
+    expect(run.win).toBe(true);
+    expect(names).toContain('bossDown');
+    expect(names.indexOf('bossDown')).toBeLessThan(names.indexOf('over'));
+    expect(run.events.find(ev => ev.t === 'bossDown')?.s).toBe(e.text);
+  });
+  it('credits every point of damage to the weapon that dealt it', () => {
+    const run = lab([['like', 1], ['star', 1]]);
+    dummy(run, run.player.x + 30, run.player.y - 6);
+    tick(run, 3);
+    const total = Object.values(run.dmgBy).reduce((a, b) => a + b, 0);
+    expect(run.dmgBy.like).toBeGreaterThan(0);
+    const shares = damageShares(run);
+    expect(shares[0].id).toBe('like');
+    expect(shares.reduce((a, q) => a + q.pct, 0)).toBeCloseTo(1);
+    expect(shares.every(q => q.name.length > 0)).toBe(true);
+    // Overkill is not counted: a 1-hp danmaku adds at most 1.
+    const weak = dummy(run, run.player.x + 20, run.player.y - 6, 1);
+    tick(run, 1);
+    expect(weak.dead).toBe(true);
+    expect(Object.values(run.dmgBy).reduce((a, b) => a + b, 0) - total).toBeLessThan(weaponStats('like', 1).dmg * 8);
+  });
+  it('the exclusive skill gets its own line in the damage table', () => {
+    const run = lab([['like', 1]], 6);
+    dummy(run, 40, 60);
+    run.ult.energy = run.ult.need;
+    expect(useUlt(run)).toBe(true);
+    expect(run.dmgBy.ult).toBeGreaterThan(0);
+    expect(damageShares(run).find(q => q.id === 'ult')?.name).toContain(run.char.ultName);
+  });
+  it('bosses move: 高能预警 follows the player and drops on them after a warning', () => {
+    const run = lab([]);
+    run.wave = 5;
+    const e = dummy(run, 10, 38);
+    Object.assign(e, { kind: 'boss', boss: 1, w: 96, h: 24, scale: 2, atk: 99, homeY: 38 });
+    run.player.x = 180;
+    tick(run, 1);
+    expect(e.x).toBeGreaterThan(30); // shadowing the player
+    e.n = 1;
+    e.atk = 0;
+    tick(run, 0.2);
+    expect(e.mode).toBe(1); // warning: has not moved yet
+    expect(e.y).toBe(38);
+    const landing = e.ty;
+    expect(landing).toBeGreaterThan(60);
+    tick(run, 1.6);
+    expect(e.mode).toBeGreaterThanOrEqual(3);
+    expect(run.bullets.length).toBeGreaterThan(0); // the landing throws a ring
+    tick(run, 6);
+    expect(e.mode).toBe(0);
+    expect(e.y).toBe(38);
+  });
+  it('bosses move: 直播事故 bounces around the upper half and 弹幕护体 weaves', () => {
+    for (const which of [2, 3] as const) {
+      const run = lab([]);
+      run.wave = which * 5;
+      const e = dummy(run, 60, 60);
+      Object.assign(e, { kind: 'boss', boss: which, w: 96, h: 24, scale: 2, atk: 2 });
+      const xs = new Set<number>(), ys = new Set<number>();
+      for (let i = 0; i < 20; i++) {
+        tick(run, 0.5);
+        xs.add(Math.round(e.x / 10));
+        ys.add(Math.round(e.y / 10));
+        expect(e.x).toBeGreaterThanOrEqual(0);
+        expect(e.x + e.w).toBeLessThanOrEqual(W + 1);
+        expect(e.y).toBeLessThan(H * 0.5 + 8);
+      }
+      expect(xs.size).toBeGreaterThan(3);
+      expect(ys.size).toBeGreaterThan(2);
+    }
+  });
   it('鬼畜 cuts every few kills into one projectile per character', () => {
     const run = lab([['like', 5], ['remix', 1]]);
     const need = weaponStats('remix', 1).count;
@@ -624,10 +721,11 @@ describe('tech tree', () => {
   it('a run pays out more 灵感 the further it gets', () => {
     expect(runInsight({ wave: 1, win: false, fans: 0, bossKills: 0 })).toBe(2);
     expect(runInsight({ wave: 4, win: false, fans: 5000, bossKills: 0 })).toBe(6);
-    expect(runInsight({ wave: 10, win: true, fans: 1_200_000, bossKills: 2 })).toBe(25);
+    expect(runInsight({ wave: 11, win: false, fans: 1_200_000, bossKills: 2 })).toBe(25);
+    expect(runInsight({ wave: 20, win: true, fans: 3e8, bossKills: 4 })).toBe(2 + 20 + 20 + 8);
     const r = playBot(77, 'smart');
     expect(runInsight(r)).toBeGreaterThanOrEqual(2);
-    expect(r.bossKills).toBeLessThanOrEqual(2);
+    expect(r.bossKills).toBeLessThanOrEqual(4);
   });
 });
 
